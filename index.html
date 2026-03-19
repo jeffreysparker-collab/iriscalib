@@ -96,6 +96,16 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 .rval{font-size:22px;font-weight:800;letter-spacing:-1px;line-height:1}
 .runit{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px}
 .rval.pending{color:var(--dim);font-size:16px;font-weight:400}
+.rci{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px;line-height:1.5}
+.rci span{color:var(--accent)}
+.rn{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:1px}
+
+/* Recording progress bar */
+#recBar{display:none;flex-direction:column;gap:5px}
+.recbar-label{font-family:var(--mono);font-size:10px;color:var(--warn)}
+.recbar-track{height:4px;background:var(--surf2);border-radius:2px;overflow:hidden}
+.recbar-fill{height:100%;background:var(--warn);border-radius:2px;width:0%;transition:width .1s linear}
+.recbar-counts{font-family:var(--mono);font-size:10px;color:var(--dim)}
 
 .btnrow{display:flex;gap:8px}
 .btn{flex:1;padding:12px;border-radius:8px;font-family:var(--mono);font-size:11px;
@@ -111,6 +121,11 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 .btn-eye.R{border-color:rgba(255,107,157,.4);color:var(--accent3);background:rgba(255,107,157,.07)}
 .btn-eye.R:active{background:rgba(255,107,157,.18)}
 .btn-eye:disabled{opacity:.3;cursor:default;pointer-events:none}
+.btn-eye.recording{animation:pulse-btn .7s ease-in-out infinite alternate}
+@keyframes pulse-btn{from{opacity:.7}to{opacity:1}}
+.btn-export{border-color:rgba(74,240,200,.25);color:var(--accent);background:rgba(74,240,200,.04);font-size:10px}
+.btn-export:active{background:rgba(74,240,200,.12)}
+.btn-export:disabled{opacity:.3;cursor:default;pointer-events:none}
 
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
   background:rgba(74,240,200,.1);border:1px solid var(--accent);border-radius:8px;
@@ -164,12 +179,23 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
         <div class="rlbl">LEFT IRIS</div>
         <div class="rval pending" id="valL">—</div>
         <div class="runit" id="unitL">not measured</div>
+        <div class="rci" id="ciL"></div>
+        <div class="rn" id="nL"></div>
       </div>
       <div class="rcard R">
         <div class="rlbl">RIGHT IRIS</div>
         <div class="rval pending" id="valR">—</div>
         <div class="runit" id="unitR">not measured</div>
+        <div class="rci" id="ciR"></div>
+        <div class="rn" id="nR"></div>
       </div>
+    </div>
+
+    <!-- Recording progress bar -->
+    <div id="recBar">
+      <div class="recbar-label" id="recLabel">● RECORDING LEFT…</div>
+      <div class="recbar-track"><div class="recbar-fill" id="recFill"></div></div>
+      <div class="recbar-counts" id="recCounts">0 / 30 samples</div>
     </div>
 
     <div class="btnrow" id="startRow">
@@ -180,8 +206,11 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
       <button class="btn btn-primary" id="lockBtn" disabled>⊙ LOCK SCALE</button>
     </div>
     <div class="btnrow" id="eyeBtns" style="display:none">
-      <button class="btn btn-eye" id="snapL" disabled>● SNAP LEFT</button>
-      <button class="btn btn-eye R" id="snapR" disabled>● SNAP RIGHT</button>
+      <button class="btn btn-eye" id="snapL" disabled>⏺ RECORD LEFT</button>
+      <button class="btn btn-eye R" id="snapR" disabled>⏺ RECORD RIGHT</button>
+    </div>
+    <div class="btnrow" id="exportRow" style="display:none">
+      <button class="btn btn-export" id="exportBtn">↓ EXPORT CSV</button>
     </div>
     <div class="btnrow" id="recalibRow" style="display:none">
       <button class="btn btn-ghost" id="recalibBtn">↺ RECALIBRATE</button>
@@ -199,6 +228,8 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 const CARD_MM  = 85.6;
 const MIN_TAPS = 2;
 const MAX_TAPS = 4;
+const REC_TARGET = 30;   // samples to collect per eye
+const T_95 = 2.045;      // t-critical for ~30 df, 95% CI (conservative)
 
 const S = {
   running:false, detector:null,
@@ -206,6 +237,13 @@ const S = {
   taps:[],
   liveIrisL:null, liveIrisR:null,
   irisL:null, irisR:null,
+  // recording state
+  recording: null,       // null | 'L' | 'R'
+  samplesL: [],          // raw mm readings
+  samplesR: [],
+  statsL: null,          // {mean, ci, n} once finalized
+  statsR: null,
+  allRaw: [],            // [{t, side, mm}] for CSV export
 };
 let phase = 'idle';
 
@@ -383,6 +421,22 @@ async function loop(){
 
           if(!S.irisL){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
           if(!S.irisR){ $('valR').textContent=rMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
+
+          // Feed recording buffer
+          if(S.recording){
+            const now = Date.now();
+            if(S.recording==='L'){
+              S.samplesL.push(lMm);
+              S.allRaw.push({t:now, side:'L', mm:lMm});
+              updateRecBar('L', S.samplesL.length);
+              if(S.samplesL.length >= REC_TARGET) finalizeEye('L');
+            } else {
+              S.samplesR.push(rMm);
+              S.allRaw.push({t:now, side:'R', mm:rMm});
+              updateRecBar('R', S.samplesR.length);
+              if(S.samplesR.length >= REC_TARGET) finalizeEye('R');
+            }
+          }
           setStatus('TRACKING','on');
         }
       }else{ setStatus('NO FACE','warn'); }
@@ -411,7 +465,7 @@ $('startBtn').onclick = async () => {
   $('calibBtns').style.display='flex';
   $('tapProgress').style.display='flex';
   $('s1').classList.add('active');
-  $('instr').innerHTML='Hold <span>credit card</span> flat beside your eye at the same depth. Tap <span>2–4 points</span> spanning the full card width (left edge, right edge, etc).';
+  $('instr').innerHTML='Hold <span>credit card</span> flat at the same depth as your eye — <span>portrait (short side up)</span> beside your cheek, or <span>landscape</span> across your forehead. Tap <span>2–4 points</span> spanning the full card width (left edge → right edge).';
   resizeCanvases();
   requestAnimationFrame(loop);
 };
@@ -442,7 +496,7 @@ $('lockBtn').onclick = () => {
   $('recalibRow').style.display='flex';
   $('snapL').disabled=false; $('snapR').disabled=false;
   $('s1').className='step done'; $('s2').classList.add('active');
-  $('instr').innerHTML='Look straight at camera. Tap <span>SNAP LEFT</span> or <span>SNAP RIGHT</span> when the iris circle looks clean.';
+  $('instr').innerHTML='Look straight at camera. Tap <span>RECORD LEFT</span> or <span>RECORD RIGHT</span> — hold still while it collects 30 frames, then it auto-locks.';
   tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
   tapCanvas.style.pointerEvents='none';
   toast(`Scale locked: ${S.mmPerPx.toFixed(4)} mm/px`);
@@ -450,10 +504,14 @@ $('lockBtn').onclick = () => {
 
 $('recalibBtn').onclick = () => {
   S.mmPerPx=null; S.taps=[];
+  S.recording=null; S.samplesL=[]; S.samplesR=[];
+  S.irisL=null; S.irisR=null; S.statsL=null; S.statsR=null;
   phase='calibrate';
   setStatus('TAP CARD','warn');
   $('eyeBtns').style.display='none';
   $('recalibRow').style.display='none';
+  $('recBar').style.display='none';
+  $('exportRow').style.display='none';
   $('calibBtns').style.display='flex';
   $('tapProgress').style.display='flex';
   tapCanvas.style.pointerEvents='';
@@ -461,39 +519,128 @@ $('recalibBtn').onclick = () => {
   $('scaleVal').textContent='—';
   $('detbadge').className='none'; $('detbadge').textContent='NO SCALE';
   $('s1').className='step active'; $('s2').className='step'; $('s3').className='step';
+  ['valL','valR'].forEach(id=>{ $(id).textContent='—'; $(id).className='rval pending'; });
+  $('unitL').textContent='not measured'; $('unitR').textContent='not measured';
+  $('ciL').textContent=''; $('ciR').textContent='';
+  $('nL').textContent=''; $('nR').textContent='';
   updateTapUI();
-  $('instr').innerHTML='Hold <span>credit card</span> flat beside your eye. Tap <span>2–4 points</span> spanning the full card width.';
+  $('instr').innerHTML='Hold <span>credit card</span> flat at the same depth as your eye. <span>Portrait</span> = 53.98mm (short side), <span>landscape</span> = 85.6mm. Tap <span>2–4 points</span> spanning the full card width.';
   toast('Recalibrating');
 };
 
-function snapEye(side){
-  const val = side==='L' ? S.liveIrisL : S.liveIrisR;
-  if(!val){ toast('No iris detected — look at camera'); return; }
-  if(side==='L'){
-    S.irisL=val;
-    $('valL').textContent=val.toFixed(2); $('valL').className='rval';
-    $('unitL').textContent='mm  ✓ snapped';
-    $('s2').className='step done'; $('s3').classList.add('active');
-  }else{
-    S.irisR=val;
-    $('valR').textContent=val.toFixed(2); $('valR').className='rval';
-    $('unitR').textContent='mm  ✓ snapped';
-    $('s3').className='step done';
-  }
-  if(S.irisL && S.irisR){
-    const diff=Math.abs(S.irisL-S.irisR).toFixed(2);
-    const larger=S.irisL>=S.irisR?'LEFT':'RIGHT';
-    $('instr').innerHTML=`<span>${larger}</span> iris larger by <span>${diff}mm</span> — L: ${S.irisL.toFixed(2)}  R: ${S.irisR.toFixed(2)}mm. Snap again to update.`;
-    setStatus('COMPLETE','on');
-  }else{
-    const other=side==='L'?'right':'left';
-    $('instr').innerHTML=`${side==='L'?'Left':'Right'}: <span>${val.toFixed(2)}mm</span> locked. Now snap the <span>${other} eye</span>.`;
-  }
-  toast(`${side==='L'?'Left':'Right'}: ${val.toFixed(2)}mm`);
+// ── statistics helpers ────────────────────────────────────────────────────────
+function computeStats(arr){
+  const n = arr.length;
+  if(n < 2) return null;
+  const mean = arr.reduce((a,b)=>a+b,0)/n;
+  const variance = arr.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
+  const se = Math.sqrt(variance/n);
+  // Use t=2.045 for n≥30, otherwise rough t for small n
+  const t = n>=30 ? 2.045 : (n>=20 ? 2.093 : (n>=10 ? 2.228 : 2.776));
+  const ci = t * se;
+  return {mean, ci, n, se, variance};
 }
 
-$('snapL').onclick = () => snapEye('L');
-$('snapR').onclick = () => snapEye('R');
+function updateRecBar(side, count){
+  const pct = Math.min(100, (count/REC_TARGET)*100);
+  $('recFill').style.width = pct+'%';
+  $('recLabel').textContent = `● RECORDING ${side==='L'?'LEFT':'RIGHT'}…`;
+  $('recCounts').textContent = `${count} / ${REC_TARGET} samples`;
+}
+
+function startRecording(side){
+  if(S.recording) return; // already recording
+  S.recording = side;
+  if(side==='L') S.samplesL=[];
+  else S.samplesR=[];
+  $('snapL').disabled = true;
+  $('snapR').disabled = true;
+  $('snapL').classList.remove('recording');
+  $('snapR').classList.remove('recording');
+  $(side==='L'?'snapL':'snapR').classList.add('recording');
+  $('recBar').style.display='flex';
+  $('recFill').style.width='0%';
+  $('recCounts').textContent=`0 / ${REC_TARGET} samples`;
+  $('recLabel').textContent=`● RECORDING ${side==='L'?'LEFT':'RIGHT'}…`;
+  toast(`Recording ${side==='L'?'left':'right'} iris — look at camera…`);
+}
+
+function finalizeEye(side){
+  const samples = side==='L' ? S.samplesL : S.samplesR;
+  const stats = computeStats(samples);
+  S.recording = null;
+  $('snapL').classList.remove('recording');
+  $('snapR').classList.remove('recording');
+  $('snapL').disabled = false;
+  $('snapR').disabled = false;
+  $('recBar').style.display='none';
+
+  if(!stats){ toast('Not enough samples — try again'); return; }
+
+  if(side==='L'){
+    S.irisL = stats.mean;
+    S.statsL = stats;
+    $('valL').textContent = stats.mean.toFixed(2);
+    $('valL').className = 'rval';
+    $('unitL').textContent = 'mm  ✓ averaged';
+    $('ciL').innerHTML = `95% CI: <span>±${stats.ci.toFixed(2)}mm</span>`;
+    $('nL').textContent = `n=${stats.n} frames`;
+    $('s2').className='step done'; $('s3').classList.add('active');
+  } else {
+    S.irisR = stats.mean;
+    S.statsR = stats;
+    $('valR').textContent = stats.mean.toFixed(2);
+    $('valR').className = 'rval';
+    $('unitR').textContent = 'mm  ✓ averaged';
+    $('ciR').innerHTML = `95% CI: <span>±${stats.ci.toFixed(2)}mm</span>`;
+    $('nR').textContent = `n=${stats.n} frames`;
+    $('s3').className='step done';
+  }
+
+  if(S.irisL && S.irisR){
+    const diff = Math.abs(S.irisL - S.irisR).toFixed(2);
+    const larger = S.irisL >= S.irisR ? 'LEFT' : 'RIGHT';
+    $('instr').innerHTML=`<span>${larger}</span> iris larger by <span>${diff}mm</span> — L: ${S.irisL.toFixed(2)}  R: ${S.irisR.toFixed(2)}mm. Record again to update.`;
+    setStatus('COMPLETE','on');
+    $('exportRow').style.display='flex';
+  } else {
+    const other = side==='L' ? 'right' : 'left';
+    $('instr').innerHTML=`${side==='L'?'Left':'Right'}: <span>${stats.mean.toFixed(2)}mm</span> (±${stats.ci.toFixed(2)}, n=${stats.n}). Now record the <span>${other} eye</span>.`;
+  }
+  toast(`${side==='L'?'Left':'Right'}: ${stats.mean.toFixed(2)} ± ${stats.ci.toFixed(2)}mm`);
+}
+
+$('snapL').onclick = () => startRecording('L');
+$('snapR').onclick = () => startRecording('R');
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+$('exportBtn').onclick = () => {
+  const ts = new Date().toISOString().replace(/[:.]/g,'-');
+  const rows = ['timestamp_ms,side,iris_mm,scale_mm_per_px'];
+
+  S.allRaw.forEach(r => {
+    rows.push(`${r.t},${r.side},${r.mm.toFixed(4)},${S.mmPerPx.toFixed(6)}`);
+  });
+
+  // Summary block
+  rows.push('');
+  rows.push('# SUMMARY');
+  rows.push('side,mean_mm,ci95_mm,n,se_mm');
+  if(S.statsL){
+    rows.push(`L,${S.statsL.mean.toFixed(4)},${S.statsL.ci.toFixed(4)},${S.statsL.n},${S.statsL.se.toFixed(4)}`);
+  }
+  if(S.statsR){
+    rows.push(`R,${S.statsR.mean.toFixed(4)},${S.statsR.ci.toFixed(4)},${S.statsR.n},${S.statsR.se.toFixed(4)}`);
+  }
+  rows.push(`# scale: ${S.mmPerPx} mm/px`);
+
+  const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `iriscalib_${ts}.csv`;
+  a.click();
+  toast('CSV exported');
+};
 
 window.addEventListener('resize', resizeCanvases);
 resizeCanvases();
