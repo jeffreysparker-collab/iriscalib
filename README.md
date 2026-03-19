@@ -5,6 +5,7 @@ Built with MediaPipe FaceMesh + WebGL. Runs entirely in the browser — no serve
 
 ## Usage
 
+
 1. Open on iPhone Safari — tap **Share → Add to Home Screen** for PWA install
 2. Tap **Start Camera**
 3. Hold credit card (85.6mm wide) flat beside your eye at camera distance
