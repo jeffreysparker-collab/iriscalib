@@ -603,13 +603,13 @@ $('lockBtn').onclick = () => {
   const mmPerCssPx = cardMm/pxW;     // mm per CSS canvas pixel
   const side = phase==='calL' ? 'L' : 'R';
   if(side==='L') S.mmPerPxL=mmPerCssPx; else S.mmPerPxR=mmPerCssPx;
-  $('scaleVal').textContent = mmPerPx.toFixed(4);
+  $('scaleVal').textContent = mmPerCssPx.toFixed(4);
   $('cardPxVal').textContent = Math.round(pxW);
   $('detbadge').className='locked';
-  $('detbadge').textContent=`${side} LOCKED  ${mmPerPx.toFixed(4)}mm/px (${Math.round(pxW)}px)`;
+  $('detbadge').textContent=`${side} LOCKED  ${mmPerCssPx.toFixed(4)}mm/px (${Math.round(pxW)}px)`;
   if(side==='L'){ $('s1').className='step done'; $('s2').classList.add('active'); }
   else          { $('s3').className='step done'; $('s4').classList.add('active'); }
-  toast(`${side==='L'?'Left':'Right'} scale: ${mmPerPx.toFixed(4)} mm/px  card=${Math.round(pxW)}px`);
+  toast(`${side==='L'?'Left':'Right'} scale: ${mmPerCssPx.toFixed(4)} mm/px  card=${Math.round(pxW)}px`);
   enterRecPhase(side);
 };
 
