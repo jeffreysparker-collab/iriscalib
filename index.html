@@ -339,15 +339,23 @@ function canvasScale(){
   return Math.max(W/vw, H/vh);
 }
 
-// ── tap handling (store only CSS px) ─────────────────────────────────────────
+// ── tap handling (store in VIDEO pixels — stable regardless of canvas size) ───
 function handleTap(e){
   if(phase!=='calL' && phase!=='calR') return;
   e.preventDefault();
   const r = tapCanvas.getBoundingClientRect();
   const src = e.touches ? e.touches[0] : e;
-  const cx = src.clientX - r.left;
-  const cy = src.clientY - r.top;
-  S.taps.push({cx, cy});   // CSS px only — no vx needed
+  const cssx = src.clientX - r.left;
+  const cssy = src.clientY - r.top;
+  // Convert CSS px → video px for stable storage
+  const sc = canvasScale();
+  const W = overlay.width;
+  const vw = video.videoWidth||1280, vh = video.videoHeight||720;
+  const offX = (W - vw*sc)/2;
+  // Mirror: video has scaleX(-1), so invert x
+  const vx = (W - cssx - offX) / sc;
+  const vy = (cssy - (overlay.height - vh*sc)/2) / sc;
+  S.taps.push({vx, vy, cx:cssx, cy:cssy});
   if(S.taps.length > MAX_TAPS) S.taps.shift();
   updateTapUI();
 }
@@ -366,11 +374,11 @@ function updateTapUI(){
     : `${n} taps — ready to lock`;
   if(n >= MIN_TAPS){
     $('lockBtn').disabled = false;
-    const xs = S.taps.map(t=>t.cx);
-    const pxW = Math.max(...xs)-Math.min(...xs);   // CSS px span
-    if(pxW>5){
-      $('scaleVal').textContent = (cardMm/pxW).toFixed(4);
-      $('cardPxVal').textContent = Math.round(pxW);
+    const xs = S.taps.map(t=>t.vx);
+    const vidPxW = Math.max(...xs)-Math.min(...xs);
+    if(vidPxW>5){
+      $('scaleVal').textContent = (cardMm/vidPxW).toFixed(4);
+      $('cardPxVal').textContent = Math.round(vidPxW);
     }
   }
   drawTapMarkers();
@@ -396,11 +404,11 @@ function drawTapMarkers(){
     tctx.beginPath(); tctx.moveTo(x0,y); tctx.lineTo(x1,y);
     tctx.strokeStyle='rgba(255,179,71,.5)'; tctx.lineWidth=1.5;
     tctx.setLineDash([5,4]); tctx.stroke(); tctx.setLineDash([]);
-    const cssW = x1 - x0;
+    const vidW = Math.abs(sorted[sorted.length-1].vx - sorted[0].vx);
     tctx.fillStyle='#ffb347';
     tctx.font='10px Space Mono,monospace';
     tctx.textAlign='center'; tctx.textBaseline='bottom';
-    tctx.fillText(`${Math.round(cssW)}css-px → ${(cardMm/cssW).toFixed(3)}mm/px`, (x0+x1)/2, y-8);
+    tctx.fillText(`${Math.round(vidW)}vid-px → ${(cardMm/vidW).toFixed(3)}mm/px`, (x0+x1)/2, y-8);
   }
 }
 
@@ -503,9 +511,16 @@ async function loop(){
             if(S.recording==='L' && lMm){
               S.samplesL.push(lMm);
               S.allRaw.push({t:now, side:'L', mm:lMm, scale:S.mmPerPxL});
+              if(S.samplesL.length<=3) console.log(`[rec] L sample#${S.samplesL.length}: lMm=${lMm.toFixed(3)} lRadVid=${lRadVid.toFixed(3)} scL=${scL}`);
             } else if(S.recording==='R' && rMm){
               S.samplesR.push(rMm);
               S.allRaw.push({t:now, side:'R', mm:rMm, scale:S.mmPerPxR});
+            }
+            // Show live sample count + running mean in debug
+            const sArr = S.recording==='L' ? S.samplesL : S.samplesR;
+            if(sArr.length>0){
+              const runMean = sArr.reduce((a,b)=>a+b,0)/sArr.length;
+              $('dbg3').textContent=`scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'} scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} | n=${sArr.length} mean=${runMean.toFixed(2)}`;
             }
             if(elapsed >= REC_SECS*1000) finalizeEye(S.recording);
           }
@@ -597,19 +612,16 @@ $('retryBtn').onclick = () => {
 
 $('lockBtn').onclick = () => {
   if(S.taps.length < MIN_TAPS){ toast('Need at least 2 taps'); return; }
-  const xs  = S.taps.map(t=>t.cx);   // CSS px
-  const cssPxW = Math.max(...xs)-Math.min(...xs);
-  if(cssPxW<10){ toast('Taps too close — span the full card width'); return; }
-  // Convert card span to video pixels so scale is canvas-size-independent
-  const sc = canvasScale();           // CSS px per video px at lock time
-  const vidPxW = cssPxW / sc;        // card width in video pixels
-  const mmPerVidPx = cardMm / vidPxW; // stable: doesn't change if window resizes
+  const xs = S.taps.map(t=>t.vx);
+  const vidPxW = Math.max(...xs)-Math.min(...xs);
+  if(vidPxW<10){ toast('Taps too close — span the full card width'); return; }
+  const mmPerVidPx = cardMm / vidPxW;
   const side = phase==='calL' ? 'L' : 'R';
   if(side==='L') S.mmPerPxL=mmPerVidPx; else S.mmPerPxR=mmPerVidPx;
   $('scaleVal').textContent = mmPerVidPx.toFixed(4);
   $('cardPxVal').textContent = Math.round(vidPxW);
   $('detbadge').className='locked';
-  $('detbadge').textContent=`${side} LOCKED  ${mmPerVidPx.toFixed(4)}mm/px (${Math.round(vidPxW)}vid-px)`;
+  $('detbadge').textContent=`${side} LOCKED  ${mmPerVidPx.toFixed(4)}mm/vid-px (${Math.round(vidPxW)}px)`;
   if(side==='L'){ $('s1').className='step done'; $('s2').classList.add('active'); }
   else          { $('s3').className='step done'; $('s4').classList.add('active'); }
   toast(`${side==='L'?'Left':'Right'} scale: ${mmPerVidPx.toFixed(4)} mm/px  card=${Math.round(vidPxW)}vid-px`);
