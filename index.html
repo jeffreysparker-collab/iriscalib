@@ -453,17 +453,17 @@ async function loop(){
         }
 
         if(kps.length>=478){
-          // iris radius in video px → convert to CSS canvas px (same space as taps)
-          const sc = canvasScale();
-          const lRadVid = irisRadius(kps,468,469);
-          const rRadVid = irisRadius(kps,473,474);
-          const lRad = lRadVid * sc;   // CSS px
-          const rRad = rRadVid * sc;   // CSS px
+          const sc = canvasScale();           // CSS px per video px (for drawing only)
+          const lRadVid = irisRadius(kps,468,469);  // video px
+          const rRadVid = irisRadius(kps,473,474);  // video px
+          const lRad = lRadVid * sc;          // CSS px — for drawing circle on canvas
+          const rRad = rRadVid * sc;
 
+          // Scale is stored as mm/video-px → use video-px radius directly
           const scL = S.mmPerPxL || S.mmPerPxR;
           const scR = S.mmPerPxR || S.mmPerPxL;
-          const lMm = scL ? lRad*2*scL : null;  // CSS-px radius × mm/CSS-px
-          const rMm = scR ? rRad*2*scR : null;
+          const lMm = scL ? lRadVid*2*scL : null;
+          const rMm = scR ? rRadVid*2*scR : null;
 
           if(lMm) S.liveIrisL=lMm;
           if(rMm) S.liveIrisR=rMm;
@@ -598,18 +598,21 @@ $('retryBtn').onclick = () => {
 $('lockBtn').onclick = () => {
   if(S.taps.length < MIN_TAPS){ toast('Need at least 2 taps'); return; }
   const xs  = S.taps.map(t=>t.cx);   // CSS px
-  const pxW = Math.max(...xs)-Math.min(...xs);
-  if(pxW<10){ toast('Taps too close — span the full card width'); return; }
-  const mmPerCssPx = cardMm/pxW;     // mm per CSS canvas pixel
+  const cssPxW = Math.max(...xs)-Math.min(...xs);
+  if(cssPxW<10){ toast('Taps too close — span the full card width'); return; }
+  // Convert card span to video pixels so scale is canvas-size-independent
+  const sc = canvasScale();           // CSS px per video px at lock time
+  const vidPxW = cssPxW / sc;        // card width in video pixels
+  const mmPerVidPx = cardMm / vidPxW; // stable: doesn't change if window resizes
   const side = phase==='calL' ? 'L' : 'R';
-  if(side==='L') S.mmPerPxL=mmPerCssPx; else S.mmPerPxR=mmPerCssPx;
-  $('scaleVal').textContent = mmPerCssPx.toFixed(4);
-  $('cardPxVal').textContent = Math.round(pxW);
+  if(side==='L') S.mmPerPxL=mmPerVidPx; else S.mmPerPxR=mmPerVidPx;
+  $('scaleVal').textContent = mmPerVidPx.toFixed(4);
+  $('cardPxVal').textContent = Math.round(vidPxW);
   $('detbadge').className='locked';
-  $('detbadge').textContent=`${side} LOCKED  ${mmPerCssPx.toFixed(4)}mm/px (${Math.round(pxW)}px)`;
+  $('detbadge').textContent=`${side} LOCKED  ${mmPerVidPx.toFixed(4)}mm/px (${Math.round(vidPxW)}vid-px)`;
   if(side==='L'){ $('s1').className='step done'; $('s2').classList.add('active'); }
   else          { $('s3').className='step done'; $('s4').classList.add('active'); }
-  toast(`${side==='L'?'Left':'Right'} scale: ${mmPerCssPx.toFixed(4)} mm/px  card=${Math.round(pxW)}px`);
+  toast(`${side==='L'?'Left':'Right'} scale: ${mmPerVidPx.toFixed(4)} mm/px  card=${Math.round(vidPxW)}vid-px`);
   enterRecPhase(side);
 };
 
