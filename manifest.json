@@ -2,7 +2,7 @@
   "name": "IrisCalib",
   "short_name": "IrisCalib",
   "description": "Calibrated iris diameter measurement using a credit card reference",
-  "start_url": "/IrisCalibrate.html",
+  "start_url": "/iris_calibrate.html",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#050508",
