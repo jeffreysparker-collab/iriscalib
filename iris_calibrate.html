@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IrisCalib">
+<meta name="theme-color" content="#050508">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>IrisCalib</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#050508;--surf:#0d0d18;--surf2:#141425;
+  --border:rgba(100,160,255,.13);--accent:#4af0c8;
+  --accent2:#7b8fff;--accent3:#ff6b9d;--warn:#ffb347;
+  --text:#e8eaf6;--dim:#5a6090;
+  --mono:'Space Mono',monospace;--sans:'Syne',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{height:-webkit-fill-available;background:var(--bg)}
+body{
+  min-height:100vh;min-height:-webkit-fill-available;
+  background:var(--bg);color:var(--text);font-family:var(--sans);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
+}
+#app{display:flex;flex-direction:column;min-height:100vh;min-height:-webkit-fill-available}
+header{
+  display:flex;align-items:center;gap:10px;padding:0 18px;height:50px;
+  background:var(--surf);border-bottom:1px solid var(--border);
+  flex-shrink:0;z-index:5;position:sticky;top:0;
+}
+.logo{font-size:17px;font-weight:800;color:var(--accent);letter-spacing:-.5px}
+.logo span{color:var(--dim);font-weight:400}
+.badge{font-family:var(--mono);font-size:10px;background:var(--accent);color:#071a14;padding:2px 5px;border-radius:3px}
+.pill{margin-left:auto;display:flex;align-items:center;gap:6px;padding:4px 11px;
+  border-radius:20px;background:var(--surf2);border:1px solid var(--border);
+  font-family:var(--mono);font-size:11px;color:var(--dim)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:background .3s}
+.dot.on{background:var(--accent);box-shadow:0 0 7px var(--accent)}
+.dot.warn{background:var(--warn);box-shadow:0 0 7px var(--warn)}
+
+/* Camera: fixed aspect, never taller than 55vh so panel is reachable */
+#camwrap{
+  position:relative;width:100%;
+  height:clamp(200px,55vw,55vh);
+  background:#000;overflow:hidden;flex-shrink:0;
+}
+video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touch-action:none}
+
+/* Panel scrolls on iOS */
+#panel{
+  background:var(--surf);border-top:1px solid var(--border);
+  padding:14px 18px 40px;flex:1;
+  display:flex;flex-direction:column;gap:12px;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
+}
+
+.steps{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.step{font-family:var(--mono);font-size:10px;letter-spacing:.8px;
+  padding:3px 8px;border-radius:4px;background:var(--surf2);
+  border:1px solid var(--border);color:var(--dim);transition:all .25s}
+.step.active{border-color:var(--accent);color:var(--accent)}
+.step.done{border-color:rgba(74,240,200,.3);color:rgba(74,240,200,.5)}
+.sep{color:var(--dim);font-size:10px}
+
+#instr{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.7;min-height:36px}
+#instr span{color:var(--accent)}
+
+/* Tap progress dots */
+#tapProgress{display:none;align-items:center;gap:8px;flex-wrap:wrap}
+.tpdot{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--warn);
+  background:transparent;transition:background .2s;flex-shrink:0}
+.tpdot.filled{background:var(--warn)}
+#tapMsg{font-family:var(--mono);font-size:10px;color:var(--warn)}
+
+#scalebox{font-family:var(--mono);font-size:11px;color:var(--dim)}
+#scalebox span{color:var(--accent)}
+
+#detbadge{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:4px;
+  display:inline-block;transition:all .3s}
+#detbadge.none{background:var(--surf2);border:1px solid var(--border);color:var(--dim)}
+#detbadge.locked{background:rgba(255,107,157,.1);border:1px solid var(--accent3);color:var(--accent3)}
+
+.rrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.rcard{background:var(--surf2);border:1px solid var(--border);border-radius:8px;
+  padding:10px 14px;position:relative;overflow:hidden}
+.rcard::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.rcard.L::before{background:var(--accent2)}
+.rcard.R::before{background:var(--accent3)}
+.rlbl{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:4px}
+.rval{font-size:22px;font-weight:800;letter-spacing:-1px;line-height:1}
+.runit{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px}
+.rval.pending{color:var(--dim);font-size:16px;font-weight:400}
+
+.btnrow{display:flex;gap:8px}
+.btn{flex:1;padding:12px;border-radius:8px;font-family:var(--mono);font-size:11px;
+  letter-spacing:.5px;cursor:pointer;transition:all .2s;border:1px solid;
+  -webkit-tap-highlight-color:transparent;background:transparent}
+.btn-primary{border-color:rgba(74,240,200,.4);color:var(--accent);background:rgba(74,240,200,.07)}
+.btn-primary:active{background:rgba(74,240,200,.18)}
+.btn-primary:disabled{opacity:.3;cursor:default;pointer-events:none}
+.btn-ghost{border-color:var(--border);color:var(--dim)}
+.btn-ghost:active{background:var(--surf2)}
+.btn-eye{border-color:rgba(123,143,255,.4);color:var(--accent2);background:rgba(123,143,255,.07)}
+.btn-eye:active{background:rgba(123,143,255,.18)}
+.btn-eye.R{border-color:rgba(255,107,157,.4);color:var(--accent3);background:rgba(255,107,157,.07)}
+.btn-eye.R:active{background:rgba(255,107,157,.18)}
+.btn-eye:disabled{opacity:.3;cursor:default;pointer-events:none}
+
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:rgba(74,240,200,.1);border:1px solid var(--accent);border-radius:8px;
+  padding:9px 16px;font-family:var(--mono);font-size:12px;color:var(--accent);
+  transition:transform .3s;white-space:nowrap;z-index:999;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">Iris<span>Calib</span></div>
+    <span class="badge">v1</span>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--dim)">iris ruler</div>
+    <div class="pill"><div class="dot" id="dot"></div><span id="stxt">IDLE</span></div>
+  </header>
+
+  <div id="camwrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <canvas id="tapCanvas"></canvas>
+  </div>
+
+  <div id="panel">
+
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div class="steps">
+        <div class="step active" id="s1">1 CALIBRATE</div>
+        <span class="sep">›</span>
+        <div class="step" id="s2">2 LEFT</div>
+        <span class="sep">›</span>
+        <div class="step" id="s3">3 RIGHT</div>
+      </div>
+      <div id="detbadge" class="none">NO SCALE</div>
+    </div>
+
+    <div id="instr">Tap <span>▶ START CAMERA</span> then follow the steps to calibrate with a credit card.</div>
+
+    <div id="tapProgress">
+      <div class="tpdot" id="td0"></div>
+      <div class="tpdot" id="td1"></div>
+      <div class="tpdot" id="td2"></div>
+      <div class="tpdot" id="td3"></div>
+      <span id="tapMsg">tap card edges</span>
+    </div>
+
+    <div id="scalebox">scale: <span id="scaleVal">—</span> mm/px</div>
+
+    <div class="rrow">
+      <div class="rcard L">
+        <div class="rlbl">LEFT IRIS</div>
+        <div class="rval pending" id="valL">—</div>
+        <div class="runit" id="unitL">not measured</div>
+      </div>
+      <div class="rcard R">
+        <div class="rlbl">RIGHT IRIS</div>
+        <div class="rval pending" id="valR">—</div>
+        <div class="runit" id="unitR">not measured</div>
+      </div>
+    </div>
+
+    <div class="btnrow" id="startRow">
+      <button class="btn btn-primary" id="startBtn">▶ START CAMERA</button>
+    </div>
+    <div class="btnrow" id="calibBtns" style="display:none">
+      <button class="btn btn-ghost" id="retryBtn">↺ CLEAR</button>
+      <button class="btn btn-primary" id="lockBtn" disabled>⊙ LOCK SCALE</button>
+    </div>
+    <div class="btnrow" id="eyeBtns" style="display:none">
+      <button class="btn btn-eye" id="snapL" disabled>● SNAP LEFT</button>
+      <button class="btn btn-eye R" id="snapR" disabled>● SNAP RIGHT</button>
+    </div>
+    <div class="btnrow" id="recalibRow" style="display:none">
+      <button class="btn btn-ghost" id="recalibBtn">↺ RECALIBRATE</button>
+    </div>
+
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.5/dist/face-landmarks-detection.min.js" crossorigin="anonymous"></script>
+<script>
+const CARD_MM  = 85.6;
+const MIN_TAPS = 2;
+const MAX_TAPS = 4;
+
+const S = {
+  running:false, detector:null,
+  mmPerPx:null,
+  taps:[],
+  liveIrisL:null, liveIrisR:null,
+  irisL:null, irisR:null,
+};
+let phase = 'idle';
+
+const $  = id => document.getElementById(id);
+const video    = $('video');
+const overlay  = $('overlay');
+const tapCanvas = $('tapCanvas');
+const octx = overlay.getContext('2d');
+const tctx = tapCanvas.getContext('2d');
+
+const toast = msg => {
+  const t=$('toast'); t.textContent=msg;
+  t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800);
+};
+const setStatus = (txt,mode='') => {
+  $('stxt').textContent=txt;
+  $('dot').className='dot'+(mode?' '+mode:'');
+};
+
+function resizeCanvases(){
+  const w=$('camwrap').clientWidth, h=$('camwrap').clientHeight;
+  [overlay,tapCanvas].forEach(c=>{ if(c.width!==w||c.height!==h){c.width=w;c.height=h;} });
+}
+
+// Convert canvas x → video pixel x (accounts for CSS mirror flip)
+function canvasToVideoX(cx){
+  const W=overlay.width, vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  const sc=Math.max(W/vw, overlay.height/vh);
+  const offX=(W-vw*sc)/2;
+  return (W-cx-offX)/sc;
+}
+function videoToCanvasX(vx){
+  const W=overlay.width, vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  const sc=Math.max(W/vw, overlay.height/vh);
+  const offX=(W-vw*sc)/2;
+  return W-(vx*sc+offX);
+}
+function videoToCanvasY(vy){
+  const H=overlay.height, vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  const sc=Math.max(H/vh, overlay.width/vw);
+  const offY=(H-vh*sc)/2;
+  return vy*sc+offY;
+}
+
+// ── tap handling ──────────────────────────────────────────────────────────────
+function handleTap(e){
+  if(phase!=='calibrate'||S.mmPerPx) return;
+  e.preventDefault();
+  const r = tapCanvas.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  const cx = src.clientX - r.left;
+  const cy = src.clientY - r.top;
+  const vx = canvasToVideoX(cx);
+  S.taps.push({vx, cx, cy});
+  if(S.taps.length > MAX_TAPS) S.taps.shift();
+  updateTapUI();
+}
+tapCanvas.addEventListener('touchstart', handleTap, {passive:false});
+tapCanvas.addEventListener('pointerdown', e => {
+  if(e.pointerType==='touch') return; // handled by touchstart
+  handleTap(e);
+});
+
+function updateTapUI(){
+  const n = S.taps.length;
+  for(let i=0;i<MAX_TAPS;i++) $('td'+i).classList.toggle('filled', i<n);
+  $('tapMsg').textContent = n < MIN_TAPS
+    ? `tap ${MIN_TAPS-n} more point${MIN_TAPS-n!==1?'s':''} on the card`
+    : n < MAX_TAPS
+      ? `${n} taps — add more or lock`
+      : `${n} taps — ready to lock`;
+  if(n >= MIN_TAPS){
+    $('lockBtn').disabled = false;
+    const xs = S.taps.map(t=>t.vx);
+    const pxW = Math.max(...xs)-Math.min(...xs);
+    if(pxW>10) $('scaleVal').textContent = (CARD_MM/pxW).toFixed(4);
+  }
+  drawTapMarkers();
+}
+
+function drawTapMarkers(){
+  const W=tapCanvas.width, H=tapCanvas.height;
+  tctx.clearRect(0,0,W,H);
+  if(!S.taps.length) return;
+  S.taps.forEach((t,i)=>{
+    tctx.beginPath(); tctx.arc(t.cx,t.cy,13,0,Math.PI*2);
+    tctx.fillStyle='rgba(255,179,71,.18)'; tctx.fill();
+    tctx.strokeStyle='#ffb347'; tctx.lineWidth=2; tctx.stroke();
+    tctx.fillStyle='#ffb347';
+    tctx.font='bold 10px Space Mono,monospace';
+    tctx.textAlign='center'; tctx.textBaseline='middle';
+    tctx.fillText(i+1, t.cx, t.cy);
+  });
+  if(S.taps.length >= 2){
+    const sorted = [...S.taps].sort((a,b)=>a.cx-b.cx);
+    const x0=sorted[0].cx, x1=sorted[sorted.length-1].cx;
+    const y = (sorted[0].cy + sorted[sorted.length-1].cy)/2;
+    tctx.beginPath(); tctx.moveTo(x0,y); tctx.lineTo(x1,y);
+    tctx.strokeStyle='rgba(255,179,71,.5)'; tctx.lineWidth=1.5;
+    tctx.setLineDash([5,4]); tctx.stroke(); tctx.setLineDash([]);
+    const vidW = Math.abs(sorted[sorted.length-1].vx - sorted[0].vx);
+    tctx.fillStyle='#ffb347';
+    tctx.font='10px Space Mono,monospace';
+    tctx.textAlign='center'; tctx.textBaseline='bottom';
+    tctx.fillText(`${Math.round(vidW)}px → ${(CARD_MM/vidW).toFixed(3)}mm/px`, (x0+x1)/2, y-8);
+  }
+}
+
+// ── iris helper ───────────────────────────────────────────────────────────────
+function irisRadius(kps,ci,es){
+  let s=0;
+  for(let i=es;i<es+4;i++) s+=Math.hypot(kps[i].x-kps[ci].x,kps[i].y-kps[ci].y);
+  return s/4;
+}
+
+// ── camera + model ────────────────────────────────────────────────────────────
+async function startCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}
+  });
+  video.srcObject = stream;
+  return new Promise(res=>{ video.onloadedmetadata=()=>{ video.play(); res(); }; });
+}
+async function loadModel(){
+  S.detector = await faceLandmarksDetection.createDetector(
+    faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+    { runtime:'mediapipe',
+      solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619',
+      refineLandmarks:true, maxFaces:1 }
+  );
+}
+
+// ── render loop ───────────────────────────────────────────────────────────────
+async function loop(){
+  if(!S.running){ requestAnimationFrame(loop); return; }
+  if(video.readyState<2){ requestAnimationFrame(loop); return; }
+
+  resizeCanvases();
+  octx.clearRect(0,0,overlay.width,overlay.height);
+
+  if(phase==='measure' && S.mmPerPx && S.detector){
+    try{
+      const faces = await S.detector.estimateFaces(video,{flipHorizontal:false});
+      if(faces.length){
+        let kps = faces[0].keypoints;
+        if(kps.length>1 && kps[1].x<2){
+          const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+          kps = kps.map(p=>({x:p.x*vw, y:p.y*vh}));
+        }
+        if(kps.length>=478){
+          const lRad = irisRadius(kps,468,469);
+          const rRad = irisRadius(kps,473,474);
+          const lMm  = lRad*2*S.mmPerPx;
+          const rMm  = rRad*2*S.mmPerPx;
+          S.liveIrisL=lMm; S.liveIrisR=rMm;
+
+          const W=overlay.width, H=overlay.height;
+          const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+          const sc=Math.max(W/vw,H/vh);
+
+          [[468,469,'#7b8fff',lRad,lMm,'L'],[473,474,'#ff6b9d',rRad,rMm,'R']]
+          .forEach(([ci,,col,rad,mm,side])=>{
+            const cx=videoToCanvasX(kps[ci].x);
+            const cy=videoToCanvasY(kps[ci].y);
+            const dr=rad*sc;
+            octx.beginPath(); octx.arc(cx,cy,dr,0,Math.PI*2);
+            octx.strokeStyle=col; octx.lineWidth=2; octx.stroke();
+            octx.beginPath(); octx.arc(cx,cy,3,0,Math.PI*2);
+            octx.fillStyle=col; octx.fill();
+            octx.fillStyle=col;
+            octx.font='bold 11px Space Mono,monospace';
+            octx.textAlign='center'; octx.textBaseline='bottom';
+            octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-dr-4);
+          });
+
+          if(!S.irisL){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
+          if(!S.irisR){ $('valR').textContent=rMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
+          setStatus('TRACKING','on');
+        }
+      }else{ setStatus('NO FACE','warn'); }
+    }catch(e){ /* skip frame */ }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ── buttons ───────────────────────────────────────────────────────────────────
+$('startBtn').onclick = async () => {
+  $('startBtn').disabled=true; $('startBtn').textContent='Starting…';
+  setStatus('CAMERA…','warn');
+  try{ await startCamera(); }
+  catch(e){
+    toast('Camera denied — check permissions');
+    $('startBtn').disabled=false; $('startBtn').textContent='▶ START CAMERA'; return;
+  }
+  setStatus('LOADING…','warn'); $('startBtn').textContent='Loading…';
+  try{ await loadModel(); }
+  catch(e){ toast('Model error'); return; }
+
+  S.running=true; phase='calibrate';
+  setStatus('TAP CARD','warn');
+  $('startRow').style.display='none';
+  $('calibBtns').style.display='flex';
+  $('tapProgress').style.display='flex';
+  $('s1').classList.add('active');
+  $('instr').innerHTML='Hold <span>credit card</span> flat beside your eye at the same depth. Tap <span>2–4 points</span> spanning the full card width (left edge, right edge, etc).';
+  resizeCanvases();
+  requestAnimationFrame(loop);
+};
+
+$('retryBtn').onclick = () => {
+  S.taps=[];
+  $('lockBtn').disabled=true;
+  $('scaleVal').textContent='—';
+  tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
+  updateTapUI();
+  toast('Taps cleared');
+};
+
+$('lockBtn').onclick = () => {
+  if(S.taps.length < MIN_TAPS){ toast('Need at least 2 taps'); return; }
+  const xs  = S.taps.map(t=>t.vx);
+  const pxW = Math.max(...xs)-Math.min(...xs);
+  if(pxW<20){ toast('Taps too close — span the full card width'); return; }
+  S.mmPerPx = CARD_MM/pxW;
+  $('scaleVal').textContent = S.mmPerPx.toFixed(4);
+  $('detbadge').className='locked';
+  $('detbadge').textContent=`LOCKED  ${S.mmPerPx.toFixed(4)}mm/px`;
+  phase='measure';
+  setStatus('MEASURING','on');
+  $('calibBtns').style.display='none';
+  $('tapProgress').style.display='none';
+  $('eyeBtns').style.display='flex';
+  $('recalibRow').style.display='flex';
+  $('snapL').disabled=false; $('snapR').disabled=false;
+  $('s1').className='step done'; $('s2').classList.add('active');
+  $('instr').innerHTML='Look straight at camera. Tap <span>SNAP LEFT</span> or <span>SNAP RIGHT</span> when the iris circle looks clean.';
+  tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
+  tapCanvas.style.pointerEvents='none';
+  toast(`Scale locked: ${S.mmPerPx.toFixed(4)} mm/px`);
+};
+
+$('recalibBtn').onclick = () => {
+  S.mmPerPx=null; S.taps=[];
+  phase='calibrate';
+  setStatus('TAP CARD','warn');
+  $('eyeBtns').style.display='none';
+  $('recalibRow').style.display='none';
+  $('calibBtns').style.display='flex';
+  $('tapProgress').style.display='flex';
+  tapCanvas.style.pointerEvents='';
+  $('lockBtn').disabled=true;
+  $('scaleVal').textContent='—';
+  $('detbadge').className='none'; $('detbadge').textContent='NO SCALE';
+  $('s1').className='step active'; $('s2').className='step'; $('s3').className='step';
+  updateTapUI();
+  $('instr').innerHTML='Hold <span>credit card</span> flat beside your eye. Tap <span>2–4 points</span> spanning the full card width.';
+  toast('Recalibrating');
+};
+
+function snapEye(side){
+  const val = side==='L' ? S.liveIrisL : S.liveIrisR;
+  if(!val){ toast('No iris detected — look at camera'); return; }
+  if(side==='L'){
+    S.irisL=val;
+    $('valL').textContent=val.toFixed(2); $('valL').className='rval';
+    $('unitL').textContent='mm  ✓ snapped';
+    $('s2').className='step done'; $('s3').classList.add('active');
+  }else{
+    S.irisR=val;
+    $('valR').textContent=val.toFixed(2); $('valR').className='rval';
+    $('unitR').textContent='mm  ✓ snapped';
+    $('s3').className='step done';
+  }
+  if(S.irisL && S.irisR){
+    const diff=Math.abs(S.irisL-S.irisR).toFixed(2);
+    const larger=S.irisL>=S.irisR?'LEFT':'RIGHT';
+    $('instr').innerHTML=`<span>${larger}</span> iris larger by <span>${diff}mm</span> — L: ${S.irisL.toFixed(2)}  R: ${S.irisR.toFixed(2)}mm. Snap again to update.`;
+    setStatus('COMPLETE','on');
+  }else{
+    const other=side==='L'?'right':'left';
+    $('instr').innerHTML=`${side==='L'?'Left':'Right'}: <span>${val.toFixed(2)}mm</span> locked. Now snap the <span>${other} eye</span>.`;
+  }
+  toast(`${side==='L'?'Left':'Right'}: ${val.toFixed(2)}mm`);
+}
+
+$('snapL').onclick = () => snapEye('L');
+$('snapR').onclick = () => snapEye('R');
+
+window.addEventListener('resize', resizeCanvases);
+resizeCanvases();
+
+// ── service worker registration ───────────────────────────────────────────────
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .catch(e => console.warn('SW registration failed:', e));
+  });
+}
+</script>
+</body>
+</html>
