@@ -317,27 +317,29 @@ function resizeCanvases(){
   [overlay,tapCanvas].forEach(c=>{ if(c.width!==w||c.height!==h){c.width=w;c.height=h;} });
 }
 
-// Convert canvas x → video pixel x (accounts for CSS mirror flip)
-function canvasToVideoX(cx){
-  const W=overlay.width, vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  const sc=Math.max(W/vw, overlay.height/vh);
-  const offX=(W-vw*sc)/2;
-  return (W-cx-offX)/sc;
-}
-function videoToCanvasX(vx){
-  const W=overlay.width, vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  const sc=Math.max(W/vw, overlay.height/vh);
-  const offX=(W-vw*sc)/2;
-  return W-(vx*sc+offX);
-}
-function videoToCanvasY(vy){
-  const H=overlay.height, vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  const sc=Math.max(H/vh, overlay.width/vw);
-  const offY=(H-vh*sc)/2;
-  return vy*sc+offY;
+// ── coordinate helpers (all in CSS canvas pixels) ─────────────────────────────
+// Map video coords → canvas CSS pixels (accounts for object-fit:cover + mirror)
+function videoPxToCanvasPx(vx, vy){
+  const W=overlay.width, H=overlay.height;
+  const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  // cover scale: which axis fills first
+  const sc = Math.max(W/vw, H/vh);
+  const offX = (W - vw*sc)/2;
+  const offY = (H - vh*sc)/2;
+  // mirror: video CSS has scaleX(-1), so x is flipped
+  const cx = W - (vx*sc + offX);
+  const cy = vy*sc + offY;
+  return {cx, cy};
 }
 
-// ── tap handling ──────────────────────────────────────────────────────────────
+// The scale we care about: canvas CSS px per video px (same sc used above)
+function canvasScale(){
+  const W=overlay.width, H=overlay.height;
+  const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  return Math.max(W/vw, H/vh);
+}
+
+// ── tap handling (store only CSS px) ─────────────────────────────────────────
 function handleTap(e){
   if(phase!=='calL' && phase!=='calR') return;
   e.preventDefault();
@@ -345,14 +347,13 @@ function handleTap(e){
   const src = e.touches ? e.touches[0] : e;
   const cx = src.clientX - r.left;
   const cy = src.clientY - r.top;
-  const vx = canvasToVideoX(cx);
-  S.taps.push({vx, cx, cy});
+  S.taps.push({cx, cy});   // CSS px only — no vx needed
   if(S.taps.length > MAX_TAPS) S.taps.shift();
   updateTapUI();
 }
 tapCanvas.addEventListener('touchstart', handleTap, {passive:false});
 tapCanvas.addEventListener('pointerdown', e => {
-  if(e.pointerType==='touch') return; // handled by touchstart
+  if(e.pointerType==='touch') return;
   handleTap(e);
 });
 
@@ -361,14 +362,13 @@ function updateTapUI(){
   for(let i=0;i<MAX_TAPS;i++) $('td'+i).classList.toggle('filled', i<n);
   $('tapMsg').textContent = n < MIN_TAPS
     ? `tap ${MIN_TAPS-n} more point${MIN_TAPS-n!==1?'s':''} on the card`
-    : n < MAX_TAPS
-      ? `${n} taps — add more or lock`
-      : `${n} taps — ready to lock`;
+    : n < MAX_TAPS ? `${n} taps — add more or lock`
+    : `${n} taps — ready to lock`;
   if(n >= MIN_TAPS){
     $('lockBtn').disabled = false;
-    const xs = S.taps.map(t=>t.vx);
-    const pxW = Math.max(...xs)-Math.min(...xs);
-    if(pxW>10){
+    const xs = S.taps.map(t=>t.cx);
+    const pxW = Math.max(...xs)-Math.min(...xs);   // CSS px span
+    if(pxW>5){
       $('scaleVal').textContent = (cardMm/pxW).toFixed(4);
       $('cardPxVal').textContent = Math.round(pxW);
     }
@@ -396,11 +396,11 @@ function drawTapMarkers(){
     tctx.beginPath(); tctx.moveTo(x0,y); tctx.lineTo(x1,y);
     tctx.strokeStyle='rgba(255,179,71,.5)'; tctx.lineWidth=1.5;
     tctx.setLineDash([5,4]); tctx.stroke(); tctx.setLineDash([]);
-    const vidW = Math.abs(sorted[sorted.length-1].vx - sorted[0].vx);
+    const cssW = x1 - x0;
     tctx.fillStyle='#ffb347';
     tctx.font='10px Space Mono,monospace';
     tctx.textAlign='center'; tctx.textBaseline='bottom';
-    tctx.fillText(`${Math.round(vidW)}px → ${(cardMm/vidW).toFixed(3)}mm/px`, (x0+x1)/2, y-8);
+    tctx.fillText(`${Math.round(cssW)}css-px → ${(cardMm/cssW).toFixed(3)}mm/px`, (x0+x1)/2, y-8);
   }
 }
 
@@ -453,34 +453,34 @@ async function loop(){
         }
 
         if(kps.length>=478){
-          const lRad = irisRadius(kps,468,469);
-          const rRad = irisRadius(kps,473,474);
+          // iris radius in video px → convert to CSS canvas px (same space as taps)
+          const sc = canvasScale();
+          const lRadVid = irisRadius(kps,468,469);
+          const rRadVid = irisRadius(kps,473,474);
+          const lRad = lRadVid * sc;   // CSS px
+          const rRad = rRadVid * sc;   // CSS px
 
           const scL = S.mmPerPxL || S.mmPerPxR;
           const scR = S.mmPerPxR || S.mmPerPxL;
-          const lMm = scL ? lRad*2*scL : null;
+          const lMm = scL ? lRad*2*scL : null;  // CSS-px radius × mm/CSS-px
           const rMm = scR ? rRad*2*scR : null;
 
           if(lMm) S.liveIrisL=lMm;
           if(rMm) S.liveIrisR=rMm;
 
-          // On-screen debug panel
+          // Debug panel
           $('debugPanel').style.display='';
-          $('dbg1').textContent=`video: ${vw}×${vh}  canvas: ${overlay.width}×${overlay.height}`;
-          $('dbg2').textContent=`lRad: ${lRad.toFixed(2)}px  rRad: ${rRad.toFixed(2)}px  (video-space)`;
-          $('dbg3').textContent=`scaleL: ${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  scaleR: ${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'}`;
+          $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  sc:${sc.toFixed(4)}`;
+          $('dbg2').textContent=`lRadVid:${lRadVid.toFixed(2)}  lRadCSS:${lRad.toFixed(2)}  lMm:${lMm?lMm.toFixed(2):'—'}`;
+          $('dbg3').textContent=`scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'}`;
 
-          const W=overlay.width, H=overlay.height;
-          const sc=Math.max(W/vw,H/vh);
-
-          [[468,469,'#7b8fff',lRad,lMm,'L'],[473,474,'#ff6b9d',rRad,rMm,'R']]
-          .forEach(([ci,,col,rad,mm,side])=>{
+          // Draw iris circles using unified coord helper
+          [[468,'#7b8fff',lRad,lMm,'L'],[473,'#ff6b9d',rRad,rMm,'R']]
+          .forEach(([ci,col,rad,mm,side])=>{
             if(!mm) return;
-            const cx=videoToCanvasX(kps[ci].x);
-            const cy=videoToCanvasY(kps[ci].y);
-            const dr=rad*sc;
+            const {cx,cy} = videoPxToCanvasPx(kps[ci].x, kps[ci].y);
             const isActive = S.recording===side;
-            octx.beginPath(); octx.arc(cx,cy,dr,0,Math.PI*2);
+            octx.beginPath(); octx.arc(cx,cy,rad,0,Math.PI*2);
             octx.strokeStyle=col; octx.lineWidth=isActive?3:1.5;
             octx.globalAlpha=isActive?1:0.5;
             octx.stroke(); octx.globalAlpha=1;
@@ -489,7 +489,7 @@ async function loop(){
             octx.fillStyle=col;
             octx.font='bold 11px Space Mono,monospace';
             octx.textAlign='center'; octx.textBaseline='bottom';
-            octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-dr-4);
+            octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-rad-4);
           });
 
           if(!S.irisL && lMm){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
@@ -597,12 +597,12 @@ $('retryBtn').onclick = () => {
 
 $('lockBtn').onclick = () => {
   if(S.taps.length < MIN_TAPS){ toast('Need at least 2 taps'); return; }
-  const xs  = S.taps.map(t=>t.vx);
+  const xs  = S.taps.map(t=>t.cx);   // CSS px
   const pxW = Math.max(...xs)-Math.min(...xs);
-  if(pxW<20){ toast('Taps too close — span the full card width'); return; }
-  const mmPerPx = cardMm/pxW;
+  if(pxW<10){ toast('Taps too close — span the full card width'); return; }
+  const mmPerCssPx = cardMm/pxW;     // mm per CSS canvas pixel
   const side = phase==='calL' ? 'L' : 'R';
-  if(side==='L') S.mmPerPxL=mmPerPx; else S.mmPerPxR=mmPerPx;
+  if(side==='L') S.mmPerPxL=mmPerCssPx; else S.mmPerPxR=mmPerCssPx;
   $('scaleVal').textContent = mmPerPx.toFixed(4);
   $('cardPxVal').textContent = Math.round(pxW);
   $('detbadge').className='locked';
