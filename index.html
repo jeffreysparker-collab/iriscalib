@@ -461,17 +461,15 @@ async function loop(){
         }
 
         if(kps.length>=478){
-          const sc = canvasScale();           // CSS px per video px (for drawing only)
-          const lRadVid = irisRadius(kps,468,469);  // video px
-          const rRadVid = irisRadius(kps,473,474);  // video px
-          const lRad = lRadVid * sc;          // CSS px — for drawing circle on canvas
+          const sc = canvasScale();
+          const lRadVid = irisRadius(kps,468,469);
+          const rRadVid = irisRadius(kps,473,474);
+          const lRad = lRadVid * sc;  // CSS px — drawing only
           const rRad = rRadVid * sc;
 
-          // Scale is stored as mm/video-px → use video-px radius directly
-          const scL = S.mmPerPxL || S.mmPerPxR;
-          const scR = S.mmPerPxR || S.mmPerPxL;
-          const lMm = scL ? lRadVid*2*scL : null;
-          const rMm = scR ? rRadVid*2*scR : null;
+          // Use side-specific scales ONLY — no cross-fallback
+          const lMm = S.mmPerPxL ? lRadVid*2*S.mmPerPxL : null;
+          const rMm = S.mmPerPxR ? rRadVid*2*S.mmPerPxR : null;
 
           if(lMm) S.liveIrisL=lMm;
           if(rMm) S.liveIrisR=rMm;
@@ -482,7 +480,7 @@ async function loop(){
           $('dbg2').textContent=`lRadVid:${lRadVid.toFixed(2)}  lRadCSS:${lRad.toFixed(2)}  lMm:${lMm?lMm.toFixed(2):'—'}`;
           $('dbg3').textContent=`scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'}`;
 
-          // Draw iris circles using unified coord helper
+          // Draw iris circles
           [[468,'#7b8fff',lRad,lMm,'L'],[473,'#ff6b9d',rRad,rMm,'R']]
           .forEach(([ci,col,rad,mm,side])=>{
             if(!mm) return;
@@ -500,8 +498,9 @@ async function loop(){
             octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-rad-4);
           });
 
-          if(!S.irisL && lMm){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
-          if(!S.irisR && rMm){ $('valR').textContent=rMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
+          // Live display — only update if no finalized result yet for that side
+          if(lMm && !S.statsL){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
+          if(rMm && !S.statsR){ $('valR').textContent=rMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
 
           if(S.recording && S.recStart){
             const now = Date.now();
@@ -511,12 +510,11 @@ async function loop(){
             if(S.recording==='L' && lMm){
               S.samplesL.push(lMm);
               S.allRaw.push({t:now, side:'L', mm:lMm, scale:S.mmPerPxL});
-              if(S.samplesL.length<=3) console.log(`[rec] L sample#${S.samplesL.length}: lMm=${lMm.toFixed(3)} lRadVid=${lRadVid.toFixed(3)} scL=${scL}`);
             } else if(S.recording==='R' && rMm){
               S.samplesR.push(rMm);
               S.allRaw.push({t:now, side:'R', mm:rMm, scale:S.mmPerPxR});
             }
-            // Show live sample count + running mean in debug
+            // Running mean in debug
             const sArr = S.recording==='L' ? S.samplesL : S.samplesR;
             if(sArr.length>0){
               const runMean = sArr.reduce((a,b)=>a+b,0)/sArr.length;
