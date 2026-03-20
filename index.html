@@ -445,29 +445,40 @@ async function loop(){
         }
 
         if(kps.length>=478){
-          // ALL in VIDEO pixels — taps store vx (video px), scale = mm/video-px
-          const lRadVid = irisRadius(kps,468,469);
-          const rRadVid = irisRadius(kps,473,474);
-          const lMm = S.mmPerPxL ? lRadVid*2*S.mmPerPxL : null;
-          const rMm = S.mmPerPxR ? rRadVid*2*S.mmPerPxR : null;
-          if(lMm) S.liveIrisL=lMm;
-          if(rMm) S.liveIrisR=rMm;
+          // kp468 = subject's LEFT iris, kp473 = subject's RIGHT iris (MediaPipe convention)
+          // Video is CSS mirrored (scaleX:-1), so subject-left appears screen-RIGHT.
+          // → screen-LEFT card = subject's RIGHT = kp473
+          // → screen-RIGHT card = subject's LEFT = kp468
+          const kp468Rad = irisRadius(kps,468,469);  // subject-L / screen-R
+          const kp473Rad = irisRadius(kps,473,474);  // subject-R / screen-L
+          const screenLMm = S.mmPerPxL ? kp473Rad*2*S.mmPerPxL : null;
+          const screenRMm = S.mmPerPxR ? kp468Rad*2*S.mmPerPxR : null;
 
-          // Debug — lRad*2*scaleL should ≈ 11-13mm
+          if(screenLMm) S.liveIrisL=screenLMm;
+          if(screenRMm) S.liveIrisR=screenRMm;
+
+          // Pose quality check — both radii similar means face is straight-on
+          const radRatio = (kp473Rad>0&&kp468Rad>0) ? Math.max(kp468Rad,kp473Rad)/Math.min(kp468Rad,kp473Rad) : 99;
+          const faceStraight = radRatio < 1.20;
+
+          // Debug — freeze finalized values, only show live for active side
           $('debugPanel').style.display='';
-          $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  raw468x:${rawX468.toFixed(3)}`;
-          $('dbg2').textContent=`lRad:${lRadVid.toFixed(2)}vid-px  rRad:${rRadVid.toFixed(2)}vid-px`;
-          $('dbg3').textContent=`scL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'} lMm:${lMm?lMm.toFixed(2):'—'}  scR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} rMm:${rMm?rMm.toFixed(2):'—'}`;
+          $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  raw468x:${rawX468.toFixed(1)}`;
+          $('dbg2').textContent=`kp473(scrL):${kp473Rad.toFixed(2)}px  kp468(scrR):${kp468Rad.toFixed(2)}px  ratio:${radRatio<99?radRatio.toFixed(2):'—'}${radRatio<1.2?' ✓':' ✗ turn straight'}`;
+          const showL = S.statsL ? S.statsL.mean.toFixed(2)+'✓' : (screenLMm?screenLMm.toFixed(2):'—');
+          const showR = S.statsR ? S.statsR.mean.toFixed(2)+'✓' : (screenRMm?screenRMm.toFixed(2):'—');
+          $('dbg3').textContent=`scL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'} scrL:${showL}  scR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} scrR:${showR}`;
 
-          // Draw (video px → canvas CSS px for rendering only)
+          // Draw circles
           const W=overlay.width, H=overlay.height;
           const drawSc=Math.max(W/vw, H/vh);
-          [[468,'#7b8fff',lRadVid,lMm,'L'],[473,'#ff6b9d',rRadVid,rMm,'R']]
-          .forEach(([ci,col,radVid,mm,side])=>{
+          // [landmark-ci, color, radVid, mm-value, screen-side-key]
+          [[473,'#7b8fff',kp473Rad,screenLMm,'L'],[468,'#ff6b9d',kp468Rad,screenRMm,'R']]
+          .forEach(([ci,col,radVid,mm,scr])=>{
             if(!mm) return;
             const {x:cx,y:cy}=vidToCanvas(kps[ci].x,kps[ci].y);
             const dr=radVid*drawSc;
-            const isActive=S.recording===side;
+            const isActive=S.recording===scr;
             octx.beginPath(); octx.arc(cx,cy,dr,0,Math.PI*2);
             octx.strokeStyle=col; octx.lineWidth=isActive?3:1.5;
             octx.globalAlpha=isActive?1:0.5; octx.stroke(); octx.globalAlpha=1;
@@ -475,20 +486,31 @@ async function loop(){
             octx.fillStyle=col; octx.fill();
             octx.fillStyle=col; octx.font='bold 11px Space Mono,monospace';
             octx.textAlign='center'; octx.textBaseline='bottom';
-            octx.fillText(`${side} ${mm.toFixed(2)}mm`,cx,cy-dr-4);
+            octx.fillText(`${mm.toFixed(2)}mm`,cx,cy-dr-4);
           });
 
-          if(lMm&&!S.statsL){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
-          if(rMm&&!S.statsR){ $('valR').textContent=rMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
+          // Live card updates — only if not yet finalized
+          if(screenLMm&&!S.statsL){ $('valL').textContent=screenLMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
+          if(screenRMm&&!S.statsR){ $('valR').textContent=screenRMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
 
           if(S.recording&&S.recStart){
             const now=Date.now(), elapsed=now-S.recStart;
             updateRecBar(S.recording,Math.min(1,elapsed/(REC_SECS*1000)));
-            if(S.recording==='L'&&lMm){ S.samplesL.push(lMm); S.allRaw.push({t:now,side:'L',mm:lMm,scale:S.mmPerPxL}); }
-            else if(S.recording==='R'&&rMm){ S.samplesR.push(rMm); S.allRaw.push({t:now,side:'R',mm:rMm,scale:S.mmPerPxR}); }
+            if(faceStraight){
+              // Only accumulate frames where face is straight-on
+              if(S.recording==='L'&&screenLMm){ S.samplesL.push(screenLMm); S.allRaw.push({t:now,side:'L',mm:screenLMm,scale:S.mmPerPxL}); }
+              else if(S.recording==='R'&&screenRMm){ S.samplesR.push(screenRMm); S.allRaw.push({t:now,side:'R',mm:screenRMm,scale:S.mmPerPxR}); }
+            }
+            // Status feedback
+            if(!faceStraight){
+              setStatus('TURN STRAIGHT','warn');
+            } else {
+              setStatus('TRACKING','on');
+            }
             if(elapsed>=REC_SECS*1000) finalizeEye(S.recording);
+          } else {
+            setStatus(faceStraight?'TRACKING':'TURN STRAIGHT', faceStraight?'on':'warn');
           }
-          setStatus('TRACKING','on');
         }
       }else{ setStatus('NO FACE','warn'); }
     }catch(e){ console.warn('[IrisCalib] loop error:',e); }
@@ -542,7 +564,7 @@ function enterRecPhase(side){
   $('recalibRBtn').style.display = side==='R' ? '' : 'none';
   $('recalibAllBtn').style.display = '';
   const eye = side==='L' ? 'LEFT' : 'RIGHT';
-  $('instr').innerHTML=`Look straight at camera. Tap <span>RECORD ${eye}</span> — hold still for <span>${REC_SECS}s</span>, then it auto-locks.`;
+  $('instr').innerHTML=`Look <span>straight</span> at camera — both eyes must be visible. Tap <span>RECORD ${eye}</span> and hold still for <span>${REC_SECS}s</span>. Status shows TURN STRAIGHT if pose is off.`;
 }
 
 // ── buttons ───────────────────────────────────────────────────────────────────
@@ -672,17 +694,18 @@ function finalizeEye(side){
 
   if(!stats||stats.n<3){ toast('Too few samples — keep face visible, try again'); return; }
 
-  const warn = stats.mean>15;
+  // Warn if result is outside plausible human iris range (10–14mm typical)
+  const warn = stats.mean > 16 || stats.mean < 6;
   const warnTxt = warn ? ' ⚠' : '';
 
   if(side==='L'){
     S.irisL=stats.mean; S.statsL=stats;
+    S.lRadAtCalL = S.liveIrisL ? S.samplesL[Math.floor(S.samplesL.length/2)] : null; // midpoint sample for cross-check
     $('valL').textContent=stats.mean.toFixed(2)+warnTxt; $('valL').className='rval';
     $('unitL').textContent='mm  ✓ averaged';
     $('ciL').innerHTML=`95% CI: <span>±${stats.ci.toFixed(2)}mm</span>`;
     $('nL').textContent=`n=${stats.n} frames`;
     $('s2').className='step done'; $('s3').classList.add('active');
-    // Auto-advance to cal-R
     enterCalPhase('R');
   } else {
     S.irisR=stats.mean; S.statsR=stats;
@@ -693,14 +716,18 @@ function finalizeEye(side){
     $('s4').className='step done';
   }
 
-  if(warn) toast(`⚠ ${stats.mean.toFixed(1)}mm seems large — was card at eye depth?`);
+  if(warn) toast(`⚠ ${stats.mean.toFixed(1)}mm outside 6–16mm range — recheck calibration`);
   else     toast(`${side==='L'?'Left':'Right'}: ${stats.mean.toFixed(2)} ± ${stats.ci.toFixed(2)}mm`);
 
   if(S.irisL && S.irisR){
-    const diff=Math.abs(S.irisL-S.irisR).toFixed(2);
+    const diff=Math.abs(S.irisL-S.irisR);
     const larger=S.irisL>=S.irisR?'LEFT':'RIGHT';
-    const warnNote = (S.irisL>15||S.irisR>15) ? '  <span style="color:var(--warn)">⚠ recheck card depth</span>' : '';
-    $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff}mm</span> — L:${S.irisL.toFixed(2)} R:${S.irisR.toFixed(2)}mm${warnNote}`;
+    const badRange = S.irisL>16||S.irisR>16||S.irisL<6||S.irisR<6;
+    const bigDiff = diff > 2.0;  // >2mm asymmetry is unusual, >1mm is clinically notable
+    const warnNote = badRange ? '  <span style="color:var(--warn)">⚠ outside 6–16mm range</span>'
+                   : bigDiff  ? `  <span style="color:var(--warn)">⚠ ${diff.toFixed(2)}mm asymmetry — recheck cals</span>`
+                   : '';
+    $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff.toFixed(2)}mm</span> — L:${S.irisL.toFixed(2)} R:${S.irisR.toFixed(2)}mm${warnNote}`;
     setStatus('COMPLETE','on');
     $('eyeBtns').style.display='none';
     $('recalibRow').style.display='flex';
