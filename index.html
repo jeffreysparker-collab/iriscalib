@@ -197,6 +197,7 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
         <div class="runit" id="unitL">not measured</div>
         <div class="rci" id="ciL"></div>
         <div class="rn" id="nL"></div>
+        <div class="rci" id="matL" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">matrix: <span>—</span></div>
       </div>
       <div class="rcard R">
         <div class="rlbl">RIGHT IRIS</div>
@@ -204,6 +205,7 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
         <div class="runit" id="unitR">not measured</div>
         <div class="rci" id="ciR"></div>
         <div class="rn" id="nR"></div>
+        <div class="rci" id="matR" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">matrix: <span>—</span></div>
       </div>
     </div>
 
@@ -236,6 +238,9 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
       <div id="dbg1">—</div>
       <div id="dbg2">—</div>
       <div id="dbg3">—</div>
+      <div id="dbg4" style="color:var(--accent2)">matrix scale: —</div>
+      <div id="dbg5" style="color:var(--accent2)">matrix iris: —</div>
+      <div id="dbg6" style="color:var(--accent3)">card vs matrix diff: —</div>
     </div>
     <div class="btnrow" id="recalibRow" style="display:none">
       <button class="btn btn-ghost" id="recalibLBtn" style="font-size:10px">↺ REDO CAL-L</button>
@@ -247,10 +252,8 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 </div>
 <div id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.5/dist/face-landmarks-detection.min.js" crossorigin="anonymous"></script>
+<!-- Tasks-vision API: gives facial_transformation_matrixes for metric scale -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.js" crossorigin="anonymous"></script>
 <script>
 // $ must be first — used by inline onclick handlers in HTML
 const $ = id => document.getElementById(id);
@@ -269,7 +272,7 @@ let phase = 'idle';
 
 const S = {
   running:false, detector:null,
-  // per-eye scales (separate calibrations)
+  // per-eye card-tap scales (separate calibrations)
   mmPerPxL:null, mmPerPxR:null,
   taps:[],
   liveIrisL:null, liveIrisR:null,
@@ -277,10 +280,14 @@ const S = {
   // recording state
   recording: null,       // null | 'L' | 'R'
   recStart: null,        // Date.now() when recording started
-  samplesL: [],
+  samplesL: [],          // card-calibrated samples
   samplesR: [],
+  matSamplesL: [],       // matrix-derived samples
+  matSamplesR: [],
   statsL: null,
   statsR: null,
+  matStatsL: null,
+  matStatsR: null,
   allRaw: [],
 };
 
@@ -445,60 +452,125 @@ async function startCamera(){
   });
 }
 async function loadModel(){
-  S.detector = await faceLandmarksDetection.createDetector(
-    faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-    { runtime:'mediapipe',
-      solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619',
-      refineLandmarks:true, maxFaces:1 }
+  // vision_bundle.js exposes FaceLandmarker and FilesetResolver as globals
+  const FL = window.FaceLandmarker || (window.mediapipeTasksVision||{}).FaceLandmarker;
+  const FR = window.FilesetResolver || (window.mediapipeTasksVision||{}).FilesetResolver;
+  if(!FL || !FR) throw new Error('mediapipe tasks-vision not loaded — check CDN');
+  const FaceLandmarker = FL, FilesetResolver = FR;
+  const filesetResolver = await FilesetResolver.forVisionTasks(
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
   );
+  S.detector = await FaceLandmarker.createFromOptions(filesetResolver, {
+    baseOptions: {
+      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+      delegate: 'GPU'
+    },
+    runningMode: 'VIDEO',
+    numFaces: 1,
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: true  // ← metric scale
+  });
+}
+
+// ── matrix scale extraction ───────────────────────────────────────────────────
+// facial_transformation_matrixes[0] is a 4×4 column-major Float32Array
+// that maps the canonical face model (units: cm) into image space.
+// The scale factor (px/cm) is the magnitude of the first basis vector (cols 0–2).
+function matrixScale(mat){
+  // mat is Float32Array length 16, column-major
+  // col 0 = mat[0], mat[1], mat[2], mat[3]
+  const sx = Math.sqrt(mat[0]*mat[0] + mat[1]*mat[1] + mat[2]*mat[2]);
+  const sy = Math.sqrt(mat[4]*mat[4] + mat[5]*mat[5] + mat[6]*mat[6]);
+  const sz = Math.sqrt(mat[8]*mat[8] + mat[9]*mat[9] + mat[10]*mat[10]);
+  // Assert near-uniform (log if not)
+  if(Math.abs(sx-sy)/sx > 0.05) console.warn('[matrix] non-uniform scale', sx, sy, sz);
+  return sx; // px per cm
+}
+
+// Extract yaw angle (head rotation left/right) for foreshortening correction
+function matrixYaw(mat, scaleFactor){
+  // Normalise rotation matrix
+  const r00 = mat[0]/scaleFactor, r10 = mat[1]/scaleFactor, r20 = mat[2]/scaleFactor;
+  return Math.asin(Math.max(-1, Math.min(1, -r20)));
 }
 
 // ── render loop ───────────────────────────────────────────────────────────────
-async function loop(){
+let lastVideoTime = -1;
+
+function loop(){
   if(!S.running){ requestAnimationFrame(loop); return; }
   if(video.readyState<2){ requestAnimationFrame(loop); return; }
 
   resizeCanvases();
   octx.clearRect(0,0,overlay.width,overlay.height);
 
-  // Run detection whenever the model is loaded (not just during rec phases)
-  // so the user can see tracking during calibration tap phase too
   if(S.detector){
     try{
-      const faces = await S.detector.estimateFaces(video,{flipHorizontal:false});
-      if(faces.length){
-        let kps = faces[0].keypoints;
-        const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+      // Tasks-vision uses detectForVideo with timestamp
+      const nowMs = performance.now();
+      // Only process new frames
+      if(video.currentTime === lastVideoTime){ requestAnimationFrame(loop); return; }
+      lastVideoTime = video.currentTime;
 
-        // Robust normalization: if coords are 0-1 range, scale to video pixels
-        const maxX = Math.max(...kps.slice(0,10).map(p=>p.x));
-        if(maxX < 2){
-          kps = kps.map(p=>({x:p.x*vw, y:p.y*vh}));
-        }
+      const result = S.detector.detectForVideo(video, nowMs);
+      const vw=video.videoWidth||1280, vh=video.videoHeight||720;
 
-        if(kps.length>=478){
+      if(result.faceLandmarks && result.faceLandmarks.length > 0){
+        // Landmarks are normalized 0-1 — scale to video pixels
+        const rawKps = result.faceLandmarks[0];
+        const kps = rawKps.map(p=>({x:p.x*vw, y:p.y*vh}));
+
+        if(kps.length >= 478){
           const sc = canvasScale();
-          const lRadVid = irisRadius(kps,468,469);
-          const rRadVid = irisRadius(kps,473,474);
+          const lRadVid = irisRadius(kps, 468, 469);
+          const rRadVid = irisRadius(kps, 473, 474);
           const lRad = lRadVid * sc;  // CSS px — drawing only
           const rRad = rRadVid * sc;
 
-          // Use side-specific scales ONLY — no cross-fallback
-          const lMm = S.mmPerPxL ? lRadVid*2*S.mmPerPxL : null;
-          const rMm = S.mmPerPxR ? rRadVid*2*S.mmPerPxR : null;
+          // ── Method A: card-calibrated scale ──────────────────────────────
+          const lMmCard = S.mmPerPxL ? lRadVid*2*S.mmPerPxL : null;
+          const rMmCard = S.mmPerPxR ? rRadVid*2*S.mmPerPxR : null;
 
-          if(lMm) S.liveIrisL=lMm;
-          if(rMm) S.liveIrisR=rMm;
+          // ── Method B: matrix-derived metric scale ─────────────────────────
+          let lMmMat = null, rMmMat = null, pxPerMm = null, yawDeg = null;
+          if(result.facialTransformationMatrixes && result.facialTransformationMatrixes.length > 0){
+            const mat = result.facialTransformationMatrixes[0].data; // Float32Array
+            const pxPerCm = matrixScale(mat);
+            pxPerMm = pxPerCm / 10.0;
+            const yaw = matrixYaw(mat, pxPerCm);
+            yawDeg = yaw * 180 / Math.PI;
+            const cosYaw = Math.cos(yaw);
+            // Apply foreshortening correction: near-side iris gets compressed
+            // Left iris is on user's left → screen right (mirrored). Positive yaw = face turned right.
+            // The eye on the far side gets foreshortened, near side looks larger.
+            // Correction: divide by cos(yaw) — simple horizontal foreshortening
+            lMmMat = (lRadVid / cosYaw) * 2 / pxPerMm;
+            rMmMat = (rRadVid / cosYaw) * 2 / pxPerMm;
+          }
 
-          // Debug panel
+          // Best available mm for each side (card preferred when locked, else matrix)
+          const lMm = lMmCard ?? lMmMat;
+          const rMm = rMmCard ?? rMmMat;
+
+          if(lMm) S.liveIrisL = lMm;
+          if(rMm) S.liveIrisR = rMm;
+
+          // ── Debug panel ───────────────────────────────────────────────────
           $('debugPanel').style.display='';
           $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  sc:${sc.toFixed(4)}`;
-          $('dbg2').textContent=`lRadVid:${lRadVid.toFixed(2)}  lRadCSS:${lRad.toFixed(2)}  lMm:${lMm?lMm.toFixed(2):'—'}`;
-          $('dbg3').textContent=`scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'}`;
+          $('dbg2').textContent=`lRadVid:${lRadVid.toFixed(2)}  rRadVid:${rRadVid.toFixed(2)}`;
+          $('dbg3').textContent=`card scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'}`;
+          $('dbg4').textContent=`matrix: ${pxPerMm?pxPerMm.toFixed(4)+'px/mm':'—'}  yaw:${yawDeg!==null?yawDeg.toFixed(1)+'°':'—'}`;
+          $('dbg5').textContent=`mat L:${lMmMat?lMmMat.toFixed(2):'—'}mm  mat R:${rMmMat?rMmMat.toFixed(2):'—'}mm`;
+          if(lMmCard && lMmMat){
+            const dL = (lMmCard-lMmMat).toFixed(2), dR = rMmCard&&rMmMat?(rMmCard-rMmMat).toFixed(2):'—';
+            $('dbg6').textContent=`card−matrix  L:${dL}mm  R:${dR}mm`;
+          } else { $('dbg6').textContent='card−matrix: need both methods active'; }
 
-          // Draw iris circles (always, once we have a scale for that side)
-          [[468,'#7b8fff',lRad,lMm,'L'],[473,'#ff6b9d',rRad,rMm,'R']]
-          .forEach(([ci,col,rad,mm,side])=>{
+          // ── Draw iris circles ─────────────────────────────────────────────
+          [[468,'#7b8fff',lRad,lMm,lMmCard,lMmMat,'L'],
+           [473,'#ff6b9d',rRad,rMm,rMmCard,rMmMat,'R']]
+          .forEach(([ci,col,rad,mm,mmCard,mmMat,side])=>{
             if(!mm) return;
             const {cx,cy} = videoPxToCanvasPx(kps[ci].x, kps[ci].y);
             const isActive = S.recording===side;
@@ -508,47 +580,60 @@ async function loop(){
             octx.stroke(); octx.globalAlpha=1;
             octx.beginPath(); octx.arc(cx,cy,3,0,Math.PI*2);
             octx.fillStyle=col; octx.fill();
+            // Label: show both values if available
             octx.fillStyle=col;
             octx.font='bold 11px Space Mono,monospace';
             octx.textAlign='center'; octx.textBaseline='bottom';
-            octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-rad-4);
+            const cardTxt = mmCard ? `C:${mmCard.toFixed(1)}` : '';
+            const matTxt  = mmMat  ? `M:${mmMat.toFixed(1)}`  : '';
+            const label = [cardTxt, matTxt].filter(Boolean).join(' ');
+            octx.fillText(`${side} ${label}mm`, cx, cy-rad-4);
           });
 
-          // Live display — only update if no finalized result yet for that side
-          if(lMm && !S.statsL){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
-          if(rMm && !S.statsR){ $('valR').textContent=rMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
+          // ── Live display in result cards ──────────────────────────────────
+          if(lMm && !S.statsL){
+            $('valL').textContent=lMm.toFixed(2); $('valL').className='rval';
+            $('unitL').textContent=(lMmCard?'card':'matrix')+' live';
+          }
+          if(rMm && !S.statsR){
+            $('valR').textContent=rMm.toFixed(2); $('valR').className='rval';
+            $('unitR').textContent=(rMmCard?'card':'matrix')+' live';
+          }
+          // Always update matrix live readout
+          if(lMmMat) $('matL').innerHTML=`matrix: <span>${lMmMat.toFixed(2)}mm</span>`;
+          if(rMmMat) $('matR').innerHTML=`matrix: <span>${rMmMat.toFixed(2)}mm</span>`;
 
-          // Recording logic — only during rec phases
+          // ── Recording: collect both methods ───────────────────────────────
           const inMeasure = (phase==='recL'||phase==='recR');
           if(inMeasure && S.recording && S.recStart){
             const now = Date.now();
             const elapsed = now - S.recStart;
             const pct = Math.min(1, elapsed / (REC_SECS*1000));
             updateRecBar(S.recording, pct);
-            if(S.recording==='L' && lMm){
-              S.samplesL.push(lMm);
-              S.allRaw.push({t:now, side:'L', mm:lMm, scale:S.mmPerPxL});
-            } else if(S.recording==='R' && rMm){
-              S.samplesR.push(rMm);
-              S.allRaw.push({t:now, side:'R', mm:rMm, scale:S.mmPerPxR});
+            if(S.recording==='L'){
+              if(lMmCard){ S.samplesL.push(lMmCard); S.allRaw.push({t:now,side:'L',method:'card',mm:lMmCard,scale:S.mmPerPxL}); }
+              if(lMmMat) { S.matSamplesL.push(lMmMat); S.allRaw.push({t:now,side:'L',method:'matrix',mm:lMmMat,scale:pxPerMm}); }
+            } else if(S.recording==='R'){
+              if(rMmCard){ S.samplesR.push(rMmCard); S.allRaw.push({t:now,side:'R',method:'card',mm:rMmCard,scale:S.mmPerPxR}); }
+              if(rMmMat) { S.matSamplesR.push(rMmMat); S.allRaw.push({t:now,side:'R',method:'matrix',mm:rMmMat,scale:pxPerMm}); }
             }
-            // Running mean in debug
             const sArr = S.recording==='L' ? S.samplesL : S.samplesR;
-            if(sArr.length>0){
-              const runMean = sArr.reduce((a,b)=>a+b,0)/sArr.length;
-              $('dbg3').textContent=`scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'} scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} | n=${sArr.length} mean=${runMean.toFixed(2)}`;
+            const mArr = S.recording==='L' ? S.matSamplesL : S.matSamplesR;
+            if(sArr.length>0||mArr.length>0){
+              const cMean = sArr.length ? (sArr.reduce((a,b)=>a+b,0)/sArr.length).toFixed(2) : '—';
+              const mMean = mArr.length ? (mArr.reduce((a,b)=>a+b,0)/mArr.length).toFixed(2) : '—';
+              $('dbg3').textContent=`card n=${sArr.length} mean=${cMean}  mat n=${mArr.length} mean=${mMean}`;
             }
-            // Bug 6 fix: capture and clear S.recording before finalizing to prevent double-fire
             if(elapsed >= REC_SECS*1000){
               const doneSide = S.recording;
-              S.recording = null; // clear immediately so loop can't re-enter
+              S.recording = null;
               finalizeEye(doneSide);
             }
           }
           setStatus('TRACKING','on');
         }
-      }else{ setStatus('NO FACE','warn'); }
-    }catch(e){ console.warn('[IrisCalib] loop error:',e); }
+      } else { setStatus('NO FACE','warn'); }
+    } catch(e){ console.warn('[IrisCalib] loop error:',e); }
   }
 
   requestAnimationFrame(loop);
@@ -582,8 +667,8 @@ function enterCalPhase(side){
 function enterRecPhase(side){
   phase = side==='L' ? 'recL' : 'recR';
   S.recording=null; S.recStart=null;
-  if(side==='L') S.samplesL=[];
-  else           S.samplesR=[];
+  if(side==='L'){ S.samplesL=[]; S.matSamplesL=[]; }
+  else           { S.samplesR=[]; S.matSamplesR=[]; }
   setStatus('MEASURING','on');
   $('calibBtns').style.display='none';
   $('tapProgress').style.display='none';
@@ -653,7 +738,7 @@ $('lockBtn').onclick = () => {
 };
 
 $('recalibLBtn').onclick = () => {
-  S.mmPerPxL=null; S.irisL=null; S.statsL=null;
+  S.mmPerPxL=null; S.irisL=null; S.statsL=null; S.matStatsL=null; S.matSamplesL=[];
   $('s1').className='step active'; $('s2').className='step';
   $('recalibRow').style.display='none'; $('exportRow').style.display='none';
   $('valL').textContent='—'; $('valL').className='rval pending';
@@ -663,7 +748,7 @@ $('recalibLBtn').onclick = () => {
 };
 
 $('recalibRBtn').onclick = () => {
-  S.mmPerPxR=null; S.irisR=null; S.statsR=null;
+  S.mmPerPxR=null; S.irisR=null; S.statsR=null; S.matStatsR=null; S.matSamplesR=[];
   $('s3').className='step active'; $('s4').className='step';
   $('recalibRow').style.display='none'; $('exportRow').style.display='none';
   $('valR').textContent='—'; $('valR').className='rval pending';
@@ -675,9 +760,11 @@ $('recalibRBtn').onclick = () => {
 $('recalibAllBtn').onclick = () => {
   Object.assign(S, {
     mmPerPxL:null, mmPerPxR:null, taps:[],
-    recording:null, recStart:null, samplesL:[], samplesR:[],
-    irisL:null, irisR:null, statsL:null, statsR:null, allRaw:[],
-    _debugLogged:false
+    recording:null, recStart:null,
+    samplesL:[], samplesR:[], matSamplesL:[], matSamplesR:[],
+    irisL:null, irisR:null,
+    statsL:null, statsR:null, matStatsL:null, matStatsR:null,
+    allRaw:[], _debugLogged:false
   });
   ['recalibRow','exportRow','recBar'].forEach(id=>$(''+id).style.display='none');
   ['valL','valR'].forEach(id=>{ $(id).textContent='—'; $(id).className='rval pending'; });
@@ -723,44 +810,50 @@ function startRecording(side){
 }
 
 function finalizeEye(side){
-  const samples = side==='L' ? S.samplesL : S.samplesR;
-  const stats = computeStats(samples);
+  const samples    = side==='L' ? S.samplesL    : S.samplesR;
+  const matSamples = side==='L' ? S.matSamplesL : S.matSamplesR;
+  const stats    = computeStats(samples);
+  const matStats = computeStats(matSamples);
   // S.recording already cleared by loop before calling here
   S.recStart=null;
   $('snapL').classList.remove('recording'); $('snapR').classList.remove('recording');
   $('snapL').disabled=false; $('snapR').disabled=false;
   $('recBar').style.display='none';
 
-  if(!stats||stats.n<3){ toast('Too few samples — keep face visible, try again'); return; }
+  const hasCard   = stats    && stats.n    >= 3;
+  const hasMatrix = matStats && matStats.n >= 3;
+  if(!hasCard && !hasMatrix){ toast('Too few samples — keep face visible, try again'); return; }
 
-  const warn = stats.mean>15;
+  // Primary = card if available, else matrix
+  const primary = hasCard ? stats : matStats;
+  const warn = primary.mean > 15;
   const warnTxt = warn ? ' ⚠' : '';
+  const method = hasCard ? (hasMatrix ? 'card+matrix' : 'card') : 'matrix';
 
   if(side==='L'){
-    S.irisL=stats.mean; S.statsL=stats;
-    $('valL').textContent=stats.mean.toFixed(2)+warnTxt; $('valL').className='rval';
-    $('unitL').textContent='mm  ✓ averaged';
-    $('ciL').innerHTML=`95% CI: <span>±${stats.ci.toFixed(2)}mm</span>`;
-    $('nL').textContent=`n=${stats.n} frames`;
+    S.irisL=primary.mean; S.statsL=primary; S.matStatsL=matStats;
+    $('valL').textContent=primary.mean.toFixed(2)+warnTxt; $('valL').className='rval';
+    $('unitL').textContent=`mm ✓ ${method}`;
+    $('ciL').innerHTML=`95% CI: <span>±${primary.ci.toFixed(2)}mm</span>  n=${primary.n}`;
+    $('nL').textContent=hasCard&&hasMatrix?`card:${stats.mean.toFixed(2)} mat:${matStats.mean.toFixed(2)} Δ${Math.abs(stats.mean-matStats.mean).toFixed(2)}mm`:'';
     $('s2').className='step done'; $('s3').classList.add('active');
-    // Auto-advance to cal-R
     enterCalPhase('R');
   } else {
-    S.irisR=stats.mean; S.statsR=stats;
-    $('valR').textContent=stats.mean.toFixed(2)+warnTxt; $('valR').className='rval';
-    $('unitR').textContent='mm  ✓ averaged';
-    $('ciR').innerHTML=`95% CI: <span>±${stats.ci.toFixed(2)}mm</span>`;
-    $('nR').textContent=`n=${stats.n} frames`;
+    S.irisR=primary.mean; S.statsR=primary; S.matStatsR=matStats;
+    $('valR').textContent=primary.mean.toFixed(2)+warnTxt; $('valR').className='rval';
+    $('unitR').textContent=`mm ✓ ${method}`;
+    $('ciR').innerHTML=`95% CI: <span>±${primary.ci.toFixed(2)}mm</span>  n=${primary.n}`;
+    $('nR').textContent=hasCard&&hasMatrix?`card:${stats.mean.toFixed(2)} mat:${matStats.mean.toFixed(2)} Δ${Math.abs(stats.mean-matStats.mean).toFixed(2)}mm`:'';
     $('s4').className='step done';
   }
 
-  if(warn) toast(`⚠ ${stats.mean.toFixed(1)}mm seems large — was card at eye depth?`);
-  else     toast(`${side==='L'?'Left':'Right'}: ${stats.mean.toFixed(2)} ± ${stats.ci.toFixed(2)}mm`);
+  if(warn) toast(`⚠ ${primary.mean.toFixed(1)}mm seems large — check calibration`);
+  else     toast(`${side==='L'?'Left':'Right'}: ${primary.mean.toFixed(2)} ± ${primary.ci.toFixed(2)}mm [${method}]`);
 
   if(S.irisL && S.irisR){
     const diff=Math.abs(S.irisL-S.irisR).toFixed(2);
     const larger=S.irisL>=S.irisR?'LEFT':'RIGHT';
-    const warnNote = (S.irisL>15||S.irisR>15) ? '  <span style="color:var(--warn)">⚠ recheck card depth</span>' : '';
+    const warnNote = (S.irisL>15||S.irisR>15) ? '  <span style="color:var(--warn)">⚠ recheck calibration</span>' : '';
     $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff}mm</span> — L:${S.irisL.toFixed(2)} R:${S.irisR.toFixed(2)}mm${warnNote}`;
     setStatus('COMPLETE','on');
     $('eyeBtns').style.display='none';
@@ -776,15 +869,22 @@ $('snapR').onclick = () => startRecording('R');
 // ── CSV export ────────────────────────────────────────────────────────────────
 $('exportBtn').onclick = () => {
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
-  const rows = ['timestamp_ms,side,iris_mm,scale_mm_per_px'];
+  const rows = ['timestamp_ms,side,method,iris_mm,scale'];
   S.allRaw.forEach(r=>{
-    rows.push(`${r.t},${r.side},${r.mm.toFixed(4)},${r.scale?r.scale.toFixed(6):''}`);
+    rows.push(`${r.t},${r.side},${r.method||'card'},${r.mm.toFixed(4)},${r.scale?r.scale.toFixed(6):''}`);
   });
   rows.push('');
   rows.push('# SUMMARY');
-  rows.push('side,mean_mm,ci95_mm,n,se_mm,scale_mm_per_px');
-  if(S.statsL) rows.push(`L,${S.statsL.mean.toFixed(4)},${S.statsL.ci.toFixed(4)},${S.statsL.n},${S.statsL.se.toFixed(4)},${(S.mmPerPxL||0).toFixed(6)}`);
-  if(S.statsR) rows.push(`R,${S.statsR.mean.toFixed(4)},${S.statsR.ci.toFixed(4)},${S.statsR.n},${S.statsR.se.toFixed(4)},${(S.mmPerPxR||0).toFixed(6)}`);
+  rows.push('side,method,mean_mm,ci95_mm,n,se_mm');
+  const summarize = (label, stats) => {
+    if(stats) rows.push(`${label},${stats.mean.toFixed(4)},${stats.ci.toFixed(4)},${stats.n},${stats.se.toFixed(4)}`);
+  };
+  summarize('L,card',   S.statsL   && S.mmPerPxL ? S.statsL   : null);
+  summarize('L,matrix', S.matStatsL);
+  summarize('R,card',   S.statsR   && S.mmPerPxR ? S.statsR   : null);
+  summarize('R,matrix', S.matStatsR);
+  if(S.statsL && S.matStatsL) rows.push(`L,delta_card_minus_matrix,${(S.statsL.mean-S.matStatsL.mean).toFixed(4)},,,`);
+  if(S.statsR && S.matStatsR) rows.push(`R,delta_card_minus_matrix,${(S.statsR.mean-S.matStatsR.mean).toFixed(4)},,,`);
   const blob = new Blob([rows.join('\n')],{type:'text/csv'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
