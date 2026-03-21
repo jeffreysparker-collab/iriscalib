@@ -211,7 +211,7 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
     <div id="recBar">
       <div class="recbar-label" id="recLabel">● RECORDING LEFT…</div>
       <div class="recbar-track"><div class="recbar-fill" id="recFill"></div></div>
-      <div class="recbar-counts" id="recCounts">0 / 30 samples</div>
+      <div class="recbar-counts" id="recCounts">0.0s / 4s</div>
     </div>
 
     <div class="btnrow" id="startRow">
@@ -252,6 +252,9 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.5/dist/face-landmarks-detection.min.js" crossorigin="anonymous"></script>
 <script>
+// $ must be first — used by inline onclick handlers in HTML
+const $ = id => document.getElementById(id);
+
 const CARD_MM_LAND = 85.6;
 const CARD_MM_PORT = 53.98;
 const MIN_TAPS = 2;
@@ -287,7 +290,7 @@ function setOrient(mode){
   $('orientPort').classList.toggle('active', mode==='port');
   // recompute displayed scale if taps already placed
   if(S.taps.length >= MIN_TAPS){
-    const xs = S.taps.map(t=>t.cx);
+    const xs = S.taps.map(t=>t.vx);
     const pxW = Math.max(...xs)-Math.min(...xs);
     if(pxW>10){
       $('scaleVal').textContent = (cardMm/pxW).toFixed(4);
@@ -296,7 +299,6 @@ function setOrient(mode){
   }
 }
 
-const $  = id => document.getElementById(id);
 const video    = $('video');
 const overlay  = $('overlay');
 const tapCanvas = $('tapCanvas');
@@ -317,80 +319,103 @@ function resizeCanvases(){
   [overlay,tapCanvas].forEach(c=>{ if(c.width!==w||c.height!==h){c.width=w;c.height=h;} });
 }
 
-// ── coordinate helpers ────────────────────────────────────────────────────────
-// video px → canvas CSS px (for drawing only)
-function vidToCanvas(vx, vy){
+// ── coordinate helpers (all in CSS canvas pixels) ─────────────────────────────
+// Map video coords → canvas CSS pixels (accounts for object-fit:cover + mirror)
+function videoPxToCanvasPx(vx, vy){
   const W=overlay.width, H=overlay.height;
   const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  const sc=Math.max(W/vw, H/vh);
-  const offX=(W-vw*sc)/2, offY=(H-vh*sc)/2;
-  return { x: W-(vx*sc+offX), y: vy*sc+offY };  // mirror x
+  // cover scale: which axis fills first
+  const sc = Math.max(W/vw, H/vh);
+  const offX = (W - vw*sc)/2;
+  const offY = (H - vh*sc)/2;
+  // Mirror: flip in video space first (vw-vx), then project — avoids offX sign issues
+  const cx = (vw - vx)*sc + offX;
+  const cy = vy*sc + offY;
+  return {cx, cy};
 }
 
-// canvas CSS px → video px (for taps)
-function canvasToVid(cx, cy){
+// The scale we care about: canvas CSS px per video px (same sc used above)
+function canvasScale(){
   const W=overlay.width, H=overlay.height;
   const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  const sc=Math.max(W/vw, H/vh);
-  const offX=(W-vw*sc)/2, offY=(H-vh*sc)/2;
-  return { vx:(W-cx-offX)/sc, vy:(cy-offY)/sc };
+  return Math.max(W/vw, H/vh);
 }
 
-// ── tap handling — store in VIDEO pixels ──────────────────────────────────────
+// ── tap handling (store in VIDEO pixels — stable regardless of canvas size) ───
 function handleTap(e){
   if(phase!=='calL' && phase!=='calR') return;
   e.preventDefault();
-  const r=tapCanvas.getBoundingClientRect();
-  const src=e.touches?e.touches[0]:e;
-  const cx=src.clientX-r.left, cy=src.clientY-r.top;
-  const {vx,vy}=canvasToVid(cx,cy);
-  S.taps.push({vx, cx, cy});   // vx=video px for scale; cx/cy for drawing
-  if(S.taps.length>MAX_TAPS) S.taps.shift();
+  const r = tapCanvas.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  const cssx = src.clientX - r.left;
+  const cssy = src.clientY - r.top;
+  // Convert CSS px → video px for stable storage
+  const sc = canvasScale();
+  const W = overlay.width;
+  const vw = video.videoWidth||1280, vh = video.videoHeight||720;
+  const offX = (W - vw*sc)/2;
+  // Mirror inversion: reverse the (vw-vx)*sc+offX formula → vx = vw - (cssx - offX)/sc
+  const vx = vw - (cssx - offX) / sc;
+  const vy = (cssy - (overlay.height - vh*sc)/2) / sc;
+  S.taps.push({vx, vy, cx:cssx, cy:cssy});
+  if(S.taps.length > MAX_TAPS) S.taps.shift();
   updateTapUI();
 }
-tapCanvas.addEventListener('touchstart',handleTap,{passive:false});
-tapCanvas.addEventListener('pointerdown',e=>{ if(e.pointerType==='touch')return; handleTap(e); });
+tapCanvas.addEventListener('touchstart', handleTap, {passive:false});
+tapCanvas.addEventListener('pointerdown', e => {
+  if(e.pointerType==='touch') return;
+  handleTap(e);
+});
 
 function updateTapUI(){
-  const n=S.taps.length;
-  for(let i=0;i<MAX_TAPS;i++) $('td'+i).classList.toggle('filled',i<n);
-  $('tapMsg').textContent = n<MIN_TAPS
+  const n = S.taps.length;
+  for(let i=0;i<MAX_TAPS;i++) $('td'+i).classList.toggle('filled', i<n);
+  $('tapMsg').textContent = n < MIN_TAPS
     ? `tap ${MIN_TAPS-n} more point${MIN_TAPS-n!==1?'s':''} on the card`
-    : n<MAX_TAPS ? `${n} taps — add more or lock` : `${n} taps — ready to lock`;
-  if(n>=MIN_TAPS){
-    $('lockBtn').disabled=false;
-    const xs=S.taps.map(t=>t.vx);
-    const vidW=Math.max(...xs)-Math.min(...xs);   // VIDEO px span
-    if(vidW>5){
-      $('scaleVal').textContent=(cardMm/vidW).toFixed(4);
-      $('cardPxVal').textContent=Math.round(vidW);
+    : n < MAX_TAPS ? `${n} taps — add more or lock`
+    : `${n} taps — ready to lock`;
+  if(n >= MIN_TAPS){
+    $('lockBtn').disabled = false;
+    const xs = S.taps.map(t=>t.vx);
+    const vidPxW = Math.max(...xs)-Math.min(...xs);
+    if(vidPxW>5){
+      $('scaleVal').textContent = (cardMm/vidPxW).toFixed(4);
+      $('cardPxVal').textContent = Math.round(vidPxW);
     }
   }
   drawTapMarkers();
 }
 
 function drawTapMarkers(){
-  tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
+  const W=tapCanvas.width, H=tapCanvas.height;
+  tctx.clearRect(0,0,W,H);
   if(!S.taps.length) return;
-  S.taps.forEach((t,i)=>{
+  // Re-project from stable video coords at current canvas size (fix for resize drift)
+  const projected = S.taps.map(t => {
+    const {cx, cy} = videoPxToCanvasPx(t.vx, t.vy);
+    return {cx, cy, vx: t.vx};
+  });
+  projected.forEach((t,i)=>{
     tctx.beginPath(); tctx.arc(t.cx,t.cy,13,0,Math.PI*2);
     tctx.fillStyle='rgba(255,179,71,.18)'; tctx.fill();
     tctx.strokeStyle='#ffb347'; tctx.lineWidth=2; tctx.stroke();
-    tctx.fillStyle='#ffb347'; tctx.font='bold 10px Space Mono,monospace';
+    tctx.fillStyle='#ffb347';
+    tctx.font='bold 10px Space Mono,monospace';
     tctx.textAlign='center'; tctx.textBaseline='middle';
-    tctx.fillText(i+1,t.cx,t.cy);
+    tctx.fillText(i+1, t.cx, t.cy);
   });
-  if(S.taps.length>=2){
-    const sorted=[...S.taps].sort((a,b)=>a.cx-b.cx);
+  if(projected.length >= 2){
+    const sorted = [...projected].sort((a,b)=>a.cx-b.cx);
     const x0=sorted[0].cx, x1=sorted[sorted.length-1].cx;
-    const y=(sorted[0].cy+sorted[sorted.length-1].cy)/2;
+    const y = (sorted[0].cy + sorted[sorted.length-1].cy)/2;
     tctx.beginPath(); tctx.moveTo(x0,y); tctx.lineTo(x1,y);
     tctx.strokeStyle='rgba(255,179,71,.5)'; tctx.lineWidth=1.5;
     tctx.setLineDash([5,4]); tctx.stroke(); tctx.setLineDash([]);
-    const vidW=Math.abs(sorted[sorted.length-1].vx-sorted[0].vx);
-    tctx.fillStyle='#ffb347'; tctx.font='10px Space Mono,monospace';
+    const vidW = Math.abs(sorted[sorted.length-1].vx - sorted[0].vx);
+    tctx.fillStyle='#ffb347';
+    tctx.font='10px Space Mono,monospace';
     tctx.textAlign='center'; tctx.textBaseline='bottom';
-    tctx.fillText(`${Math.round(vidW)}vid-px → ${(cardMm/vidW).toFixed(3)}mm/px`,(x0+x1)/2,y-8);
+    tctx.fillText(`${Math.round(vidW)}vid-px → ${(cardMm/vidW).toFixed(3)}mm/px`, (x0+x1)/2, y-8);
   }
 }
 
@@ -407,7 +432,17 @@ async function startCamera(){
     video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}
   });
   video.srcObject = stream;
-  return new Promise(res=>{ video.onloadedmetadata=()=>{ video.play(); res(); }; });
+  return new Promise(res=>{
+    video.onloadedmetadata = () => {
+      video.play();
+      // Wait until we actually have frame dimensions (videoWidth > 0)
+      const waitForSize = () => {
+        if(video.videoWidth > 0) { res(); }
+        else { requestAnimationFrame(waitForSize); }
+      };
+      waitForSize();
+    };
+  });
 }
 async function loadModel(){
   S.detector = await faceLandmarksDetection.createDetector(
@@ -426,91 +461,91 @@ async function loop(){
   resizeCanvases();
   octx.clearRect(0,0,overlay.width,overlay.height);
 
-  const inMeasure = (phase==='recL'||phase==='recR') && S.detector;
-  if(inMeasure){
+  // Run detection whenever the model is loaded (not just during rec phases)
+  // so the user can see tracking during calibration tap phase too
+  if(S.detector){
     try{
       const faces = await S.detector.estimateFaces(video,{flipHorizontal:false});
       if(faces.length){
         let kps = faces[0].keypoints;
         const vw=video.videoWidth||1280, vh=video.videoHeight||720;
 
-        // Check coordinate range BEFORE normalization
-        const rawX468 = faces[0].keypoints[468]?.x ?? 0;
-        const maxCoord = Math.max(...faces[0].keypoints.slice(0,10).map(p=>Math.max(p.x,p.y)));
-
-        // Normalize: MediaPipe via tfjs sometimes returns 0-1, sometimes pixel coords
+        // Robust normalization: if coords are 0-1 range, scale to video pixels
         const maxX = Math.max(...kps.slice(0,10).map(p=>p.x));
         if(maxX < 2){
           kps = kps.map(p=>({x:p.x*vw, y:p.y*vh}));
         }
 
         if(kps.length>=478){
-          // kp468 = subject's LEFT iris, kp473 = subject's RIGHT iris (MediaPipe convention)
-          // Video is CSS mirrored (scaleX:-1), so subject-left appears screen-RIGHT.
-          // → screen-LEFT card = subject's RIGHT = kp473
-          // → screen-RIGHT card = subject's LEFT = kp468
-          const kp468Rad = irisRadius(kps,468,469);  // subject-L / screen-R
-          const kp473Rad = irisRadius(kps,473,474);  // subject-R / screen-L
-          const screenLMm = S.mmPerPxL ? kp473Rad*2*S.mmPerPxL : null;
-          const screenRMm = S.mmPerPxR ? kp468Rad*2*S.mmPerPxR : null;
+          const sc = canvasScale();
+          const lRadVid = irisRadius(kps,468,469);
+          const rRadVid = irisRadius(kps,473,474);
+          const lRad = lRadVid * sc;  // CSS px — drawing only
+          const rRad = rRadVid * sc;
 
-          if(screenLMm) S.liveIrisL=screenLMm;
-          if(screenRMm) S.liveIrisR=screenRMm;
+          // Use side-specific scales ONLY — no cross-fallback
+          const lMm = S.mmPerPxL ? lRadVid*2*S.mmPerPxL : null;
+          const rMm = S.mmPerPxR ? rRadVid*2*S.mmPerPxR : null;
 
-          // Pose quality check — both radii similar means face is straight-on
-          const radRatio = (kp473Rad>0&&kp468Rad>0) ? Math.max(kp468Rad,kp473Rad)/Math.min(kp468Rad,kp473Rad) : 99;
-          const faceStraight = radRatio < 1.20;
+          if(lMm) S.liveIrisL=lMm;
+          if(rMm) S.liveIrisR=rMm;
 
-          // Debug — freeze finalized values, only show live for active side
+          // Debug panel
           $('debugPanel').style.display='';
-          $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  raw468x:${rawX468.toFixed(1)}`;
-          $('dbg2').textContent=`kp473(scrL):${kp473Rad.toFixed(2)}px  kp468(scrR):${kp468Rad.toFixed(2)}px  ratio:${radRatio<99?radRatio.toFixed(2):'—'}${radRatio<1.2?' ✓':' ✗ turn straight'}`;
-          const showL = S.statsL ? S.statsL.mean.toFixed(2)+'✓' : (screenLMm?screenLMm.toFixed(2):'—');
-          const showR = S.statsR ? S.statsR.mean.toFixed(2)+'✓' : (screenRMm?screenRMm.toFixed(2):'—');
-          $('dbg3').textContent=`scL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'} scrL:${showL}  scR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} scrR:${showR}`;
+          $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  sc:${sc.toFixed(4)}`;
+          $('dbg2').textContent=`lRadVid:${lRadVid.toFixed(2)}  lRadCSS:${lRad.toFixed(2)}  lMm:${lMm?lMm.toFixed(2):'—'}`;
+          $('dbg3').textContent=`scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'}`;
 
-          // Draw circles
-          const W=overlay.width, H=overlay.height;
-          const drawSc=Math.max(W/vw, H/vh);
-          // [landmark-ci, color, radVid, mm-value, screen-side-key]
-          [[473,'#7b8fff',kp473Rad,screenLMm,'L'],[468,'#ff6b9d',kp468Rad,screenRMm,'R']]
-          .forEach(([ci,col,radVid,mm,scr])=>{
+          // Draw iris circles (always, once we have a scale for that side)
+          [[468,'#7b8fff',lRad,lMm,'L'],[473,'#ff6b9d',rRad,rMm,'R']]
+          .forEach(([ci,col,rad,mm,side])=>{
             if(!mm) return;
-            const {x:cx,y:cy}=vidToCanvas(kps[ci].x,kps[ci].y);
-            const dr=radVid*drawSc;
-            const isActive=S.recording===scr;
-            octx.beginPath(); octx.arc(cx,cy,dr,0,Math.PI*2);
+            const {cx,cy} = videoPxToCanvasPx(kps[ci].x, kps[ci].y);
+            const isActive = S.recording===side;
+            octx.beginPath(); octx.arc(cx,cy,rad,0,Math.PI*2);
             octx.strokeStyle=col; octx.lineWidth=isActive?3:1.5;
-            octx.globalAlpha=isActive?1:0.5; octx.stroke(); octx.globalAlpha=1;
+            octx.globalAlpha=isActive?1:0.5;
+            octx.stroke(); octx.globalAlpha=1;
             octx.beginPath(); octx.arc(cx,cy,3,0,Math.PI*2);
             octx.fillStyle=col; octx.fill();
-            octx.fillStyle=col; octx.font='bold 11px Space Mono,monospace';
+            octx.fillStyle=col;
+            octx.font='bold 11px Space Mono,monospace';
             octx.textAlign='center'; octx.textBaseline='bottom';
-            octx.fillText(`${mm.toFixed(2)}mm`,cx,cy-dr-4);
+            octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-rad-4);
           });
 
-          // Live card updates — only if not yet finalized
-          if(screenLMm&&!S.statsL){ $('valL').textContent=screenLMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
-          if(screenRMm&&!S.statsR){ $('valR').textContent=screenRMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
+          // Live display — only update if no finalized result yet for that side
+          if(lMm && !S.statsL){ $('valL').textContent=lMm.toFixed(2); $('valL').className='rval'; $('unitL').textContent='mm  live'; }
+          if(rMm && !S.statsR){ $('valR').textContent=rMm.toFixed(2); $('valR').className='rval'; $('unitR').textContent='mm  live'; }
 
-          if(S.recording&&S.recStart){
-            const now=Date.now(), elapsed=now-S.recStart;
-            updateRecBar(S.recording,Math.min(1,elapsed/(REC_SECS*1000)));
-            if(faceStraight){
-              // Only accumulate frames where face is straight-on
-              if(S.recording==='L'&&screenLMm){ S.samplesL.push(screenLMm); S.allRaw.push({t:now,side:'L',mm:screenLMm,scale:S.mmPerPxL}); }
-              else if(S.recording==='R'&&screenRMm){ S.samplesR.push(screenRMm); S.allRaw.push({t:now,side:'R',mm:screenRMm,scale:S.mmPerPxR}); }
+          // Recording logic — only during rec phases
+          const inMeasure = (phase==='recL'||phase==='recR');
+          if(inMeasure && S.recording && S.recStart){
+            const now = Date.now();
+            const elapsed = now - S.recStart;
+            const pct = Math.min(1, elapsed / (REC_SECS*1000));
+            updateRecBar(S.recording, pct);
+            if(S.recording==='L' && lMm){
+              S.samplesL.push(lMm);
+              S.allRaw.push({t:now, side:'L', mm:lMm, scale:S.mmPerPxL});
+            } else if(S.recording==='R' && rMm){
+              S.samplesR.push(rMm);
+              S.allRaw.push({t:now, side:'R', mm:rMm, scale:S.mmPerPxR});
             }
-            // Status feedback
-            if(!faceStraight){
-              setStatus('TURN STRAIGHT','warn');
-            } else {
-              setStatus('TRACKING','on');
+            // Running mean in debug
+            const sArr = S.recording==='L' ? S.samplesL : S.samplesR;
+            if(sArr.length>0){
+              const runMean = sArr.reduce((a,b)=>a+b,0)/sArr.length;
+              $('dbg3').textContent=`scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'} scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} | n=${sArr.length} mean=${runMean.toFixed(2)}`;
             }
-            if(elapsed>=REC_SECS*1000) finalizeEye(S.recording);
-          } else {
-            setStatus(faceStraight?'TRACKING':'TURN STRAIGHT', faceStraight?'on':'warn');
+            // Bug 6 fix: capture and clear S.recording before finalizing to prevent double-fire
+            if(elapsed >= REC_SECS*1000){
+              const doneSide = S.recording;
+              S.recording = null; // clear immediately so loop can't re-enter
+              finalizeEye(doneSide);
+            }
           }
+          setStatus('TRACKING','on');
         }
       }else{ setStatus('NO FACE','warn'); }
     }catch(e){ console.warn('[IrisCalib] loop error:',e); }
@@ -564,7 +599,7 @@ function enterRecPhase(side){
   $('recalibRBtn').style.display = side==='R' ? '' : 'none';
   $('recalibAllBtn').style.display = '';
   const eye = side==='L' ? 'LEFT' : 'RIGHT';
-  $('instr').innerHTML=`Look <span>straight</span> at camera — both eyes must be visible. Tap <span>RECORD ${eye}</span> and hold still for <span>${REC_SECS}s</span>. Status shows TURN STRAIGHT if pose is off.`;
+  $('instr').innerHTML=`Look straight at camera. Tap <span>RECORD ${eye}</span> — hold still for <span>${REC_SECS}s</span>, then it auto-locks.`;
 }
 
 // ── buttons ───────────────────────────────────────────────────────────────────
@@ -598,7 +633,7 @@ $('retryBtn').onclick = () => {
 
 $('lockBtn').onclick = () => {
   if(S.taps.length < MIN_TAPS){ toast('Need at least 2 taps'); return; }
-  const xs = S.taps.map(t=>t.cx);
+  const xs = S.taps.map(t=>t.vx);
   const vidPxW = Math.max(...xs)-Math.min(...xs);
   if(vidPxW<10){ toast('Taps too close — span the full card width'); return; }
   const mmPerVidPx = cardMm / vidPxW;
@@ -687,25 +722,25 @@ function startRecording(side){
 function finalizeEye(side){
   const samples = side==='L' ? S.samplesL : S.samplesR;
   const stats = computeStats(samples);
-  S.recording=null; S.recStart=null;
+  // S.recording already cleared by loop before calling here
+  S.recStart=null;
   $('snapL').classList.remove('recording'); $('snapR').classList.remove('recording');
   $('snapL').disabled=false; $('snapR').disabled=false;
   $('recBar').style.display='none';
 
   if(!stats||stats.n<3){ toast('Too few samples — keep face visible, try again'); return; }
 
-  // Warn if result is outside plausible human iris range (10–14mm typical)
-  const warn = stats.mean > 16 || stats.mean < 6;
+  const warn = stats.mean>15;
   const warnTxt = warn ? ' ⚠' : '';
 
   if(side==='L'){
     S.irisL=stats.mean; S.statsL=stats;
-    S.lRadAtCalL = S.liveIrisL ? S.samplesL[Math.floor(S.samplesL.length/2)] : null; // midpoint sample for cross-check
     $('valL').textContent=stats.mean.toFixed(2)+warnTxt; $('valL').className='rval';
     $('unitL').textContent='mm  ✓ averaged';
     $('ciL').innerHTML=`95% CI: <span>±${stats.ci.toFixed(2)}mm</span>`;
     $('nL').textContent=`n=${stats.n} frames`;
     $('s2').className='step done'; $('s3').classList.add('active');
+    // Auto-advance to cal-R
     enterCalPhase('R');
   } else {
     S.irisR=stats.mean; S.statsR=stats;
@@ -716,18 +751,14 @@ function finalizeEye(side){
     $('s4').className='step done';
   }
 
-  if(warn) toast(`⚠ ${stats.mean.toFixed(1)}mm outside 6–16mm range — recheck calibration`);
+  if(warn) toast(`⚠ ${stats.mean.toFixed(1)}mm seems large — was card at eye depth?`);
   else     toast(`${side==='L'?'Left':'Right'}: ${stats.mean.toFixed(2)} ± ${stats.ci.toFixed(2)}mm`);
 
   if(S.irisL && S.irisR){
-    const diff=Math.abs(S.irisL-S.irisR);
+    const diff=Math.abs(S.irisL-S.irisR).toFixed(2);
     const larger=S.irisL>=S.irisR?'LEFT':'RIGHT';
-    const badRange = S.irisL>16||S.irisR>16||S.irisL<6||S.irisR<6;
-    const bigDiff = diff > 2.0;  // >2mm asymmetry is unusual, >1mm is clinically notable
-    const warnNote = badRange ? '  <span style="color:var(--warn)">⚠ outside 6–16mm range</span>'
-                   : bigDiff  ? `  <span style="color:var(--warn)">⚠ ${diff.toFixed(2)}mm asymmetry — recheck cals</span>`
-                   : '';
-    $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff.toFixed(2)}mm</span> — L:${S.irisL.toFixed(2)} R:${S.irisR.toFixed(2)}mm${warnNote}`;
+    const warnNote = (S.irisL>15||S.irisR>15) ? '  <span style="color:var(--warn)">⚠ recheck card depth</span>' : '';
+    $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff}mm</span> — L:${S.irisL.toFixed(2)} R:${S.irisR.toFixed(2)}mm${warnNote}`;
     setStatus('COMPLETE','on');
     $('eyeBtns').style.display='none';
     $('recalibRow').style.display='flex';
