@@ -1,4 +1,3 @@
-
 const CACHE = 'iriscalib-v1';
 const SHELL = [
   './iris_calibrate.html',
