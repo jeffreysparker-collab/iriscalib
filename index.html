@@ -568,13 +568,15 @@ function enterCalPhase(side){
   tapCanvas.style.pointerEvents='';
   tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
   updateTapUI();
-  const eye = side==='L' ? 'LEFT' : 'RIGHT';
+  // Mirror note: video is scaleX(-1), so LEFT side of screen = user's RIGHT eye.
+  const eye = side==='L' ? 'LEFT' : 'RIGHT';            // screen-side label
+  const userEye = side==='L' ? 'YOUR RIGHT' : 'YOUR LEFT'; // anatomical label
   const pos = side==='L'
-    ? 'left cheek/temple or across forehead-left'
-    : 'right cheek/temple or across forehead-right';
+    ? 'right cheek/temple — card on LEFT side of screen (your RIGHT eye)'
+    : 'left cheek/temple — card on RIGHT side of screen (your LEFT eye)';
   $('detbadge').className='none';
-  $('detbadge').textContent='NO SCALE '+eye;
-  $('instr').innerHTML=`<span>${eye} CAL</span> — card flat at <span>eye depth</span>, ${pos}. Pick orientation below, tap <span>2–4 points</span> across full card width.`;
+  $('detbadge').textContent=`NO SCALE  ${eye} SCREEN = ${userEye} EYE`;
+  $('instr').innerHTML=`<span>${eye} SCREEN (${userEye} EYE) CAL</span> — card flat at <span>eye depth</span>, ${pos}. Pick orientation below, tap <span>2–4 points</span> across full card width.`;
 }
 
 function enterRecPhase(side){
@@ -599,7 +601,8 @@ function enterRecPhase(side){
   $('recalibRBtn').style.display = side==='R' ? '' : 'none';
   $('recalibAllBtn').style.display = '';
   const eye = side==='L' ? 'LEFT' : 'RIGHT';
-  $('instr').innerHTML=`Look straight at camera. Tap <span>RECORD ${eye}</span> — hold still for <span>${REC_SECS}s</span>, then it auto-locks.`;
+  const userEye = side==='L' ? 'RIGHT' : 'LEFT';
+  $('instr').innerHTML=`Look straight at camera. Tap <span>RECORD ${eye}</span> to measure your <span>${userEye} EYE</span> (${eye} side of screen) — hold still for <span>${REC_SECS}s</span>.`;
 }
 
 // ── buttons ───────────────────────────────────────────────────────────────────
