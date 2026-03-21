@@ -5,11 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="IrisCalib">
-<meta name="theme-color" content="#050508">
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
-<title>IrisCalib</title>
+<title>IrisMeasure</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -20,29 +16,25 @@
   --mono:'Space Mono',monospace;--sans:'Syne',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{height:-webkit-fill-available;background:var(--bg)}
-body{
-  min-height:100vh;min-height:-webkit-fill-available;
-  background:var(--bg);color:var(--text);font-family:var(--sans);
-  overflow-y:auto;-webkit-overflow-scrolling:touch;
-}
-#app{display:flex;flex-direction:column;min-height:100vh;min-height:-webkit-fill-available}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans)}
+#app{display:flex;flex-direction:column;height:100%;min-height:100vh}
+
 header{
   display:flex;align-items:center;gap:10px;padding:0 18px;height:50px;
   background:var(--surf);border-bottom:1px solid var(--border);
-  flex-shrink:0;z-index:5;position:sticky;top:0;
+  flex-shrink:0;position:sticky;top:0;z-index:5;
 }
 .logo{font-size:17px;font-weight:800;color:var(--accent);letter-spacing:-.5px}
 .logo span{color:var(--dim);font-weight:400}
-.badge{font-family:var(--mono);font-size:10px;background:var(--accent);color:#071a14;padding:2px 5px;border-radius:3px}
 .pill{margin-left:auto;display:flex;align-items:center;gap:6px;padding:4px 11px;
   border-radius:20px;background:var(--surf2);border:1px solid var(--border);
   font-family:var(--mono);font-size:11px;color:var(--dim)}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:background .3s}
 .dot.on{background:var(--accent);box-shadow:0 0 7px var(--accent)}
+.dot.rec{background:var(--accent3);box-shadow:0 0 7px var(--accent3);animation:blink .7s infinite alternate}
 .dot.warn{background:var(--warn);box-shadow:0 0 7px var(--warn)}
+@keyframes blink{from{opacity:.4}to{opacity:1}}
 
-/* Camera: fixed aspect, never taller than 55vh so panel is reachable */
 #camwrap{
   position:relative;width:100%;
   height:clamp(200px,55vw,55vh);
@@ -50,42 +42,31 @@ header{
 }
 video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touch-action:none}
 
-/* Panel scrolls on iOS */
 #panel{
   background:var(--surf);border-top:1px solid var(--border);
-  padding:14px 18px 40px;flex:1;
-  display:flex;flex-direction:column;gap:12px;
+  padding:16px 18px 40px;flex:1;
+  display:flex;flex-direction:column;gap:14px;
   overflow-y:auto;-webkit-overflow-scrolling:touch;
 }
 
-.steps{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
-.step{font-family:var(--mono);font-size:10px;letter-spacing:.8px;
-  padding:3px 8px;border-radius:4px;background:var(--surf2);
-  border:1px solid var(--border);color:var(--dim);transition:all .25s}
-.step.active{border-color:var(--accent);color:var(--accent)}
-.step.done{border-color:rgba(74,240,200,.3);color:rgba(74,240,200,.5)}
-.sep{color:var(--dim);font-size:10px}
-
-#instr{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.7;min-height:36px}
+#instr{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.8;min-height:32px}
 #instr span{color:var(--accent)}
+#instr .warn{color:var(--warn)}
 
-/* Tap progress dots */
-#tapProgress{display:none;align-items:center;gap:8px;flex-wrap:wrap}
-.tpdot{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--warn);
-  background:transparent;transition:background .2s;flex-shrink:0}
-.tpdot.filled{background:var(--warn)}
-#tapMsg{font-family:var(--mono);font-size:10px;color:var(--warn)}
+/* Progress ring */
+#recRing{display:none;flex-direction:column;align-items:center;gap:8px}
+.ring-wrap{position:relative;width:80px;height:80px}
+.ring-wrap svg{transform:rotate(-90deg)}
+.ring-bg{fill:none;stroke:var(--surf2);stroke-width:6}
+.ring-fill{fill:none;stroke:var(--accent3);stroke-width:6;stroke-linecap:round;
+  stroke-dasharray:220;stroke-dashoffset:220;transition:stroke-dashoffset .15s linear}
+.ring-time{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:18px;font-weight:700;color:var(--accent3)}
+.ring-label{font-family:var(--mono);font-size:10px;color:var(--warn);letter-spacing:.8px}
+.ring-counts{font-family:var(--mono);font-size:10px;color:var(--dim)}
 
-#scalebox{font-family:var(--mono);font-size:11px;color:var(--dim)}
-#scalebox span{color:var(--accent)}
-
-#detbadge{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:4px;
-  display:inline-block;transition:all .3s}
-#detbadge.none{background:var(--surf2);border:1px solid var(--border);color:var(--dim)}
-#detbadge.locked{background:rgba(255,107,157,.1);border:1px solid var(--accent3);color:var(--accent3)}
-
+/* Result cards */
 .rrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .rcard{background:var(--surf2);border:1px solid var(--border);border-radius:8px;
   padding:10px 14px;position:relative;overflow:hidden}
@@ -93,44 +74,32 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 .rcard.L::before{background:var(--accent2)}
 .rcard.R::before{background:var(--accent3)}
 .rlbl{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:4px}
-.rval{font-size:22px;font-weight:800;letter-spacing:-1px;line-height:1}
-.runit{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px}
+.rval{font-size:26px;font-weight:800;letter-spacing:-1px;line-height:1}
 .rval.pending{color:var(--dim);font-size:16px;font-weight:400}
-.rci{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px;line-height:1.5}
+.runit{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px}
+.rci{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px;line-height:1.6}
 .rci span{color:var(--accent)}
-.rn{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:1px}
-
-/* Recording progress bar */
-#recBar{display:none;flex-direction:column;gap:5px}
-.recbar-label{font-family:var(--mono);font-size:10px;color:var(--warn)}
-.recbar-track{height:4px;background:var(--surf2);border-radius:2px;overflow:hidden}
-.recbar-fill{height:100%;background:var(--warn);border-radius:2px;width:0%;transition:width .1s linear}
-.recbar-counts{font-family:var(--mono);font-size:10px;color:var(--dim)}
 
 .btnrow{display:flex;gap:8px}
-.btn{flex:1;padding:12px;border-radius:8px;font-family:var(--mono);font-size:11px;
+.btn{flex:1;padding:13px;border-radius:8px;font-family:var(--mono);font-size:11px;
   letter-spacing:.5px;cursor:pointer;transition:all .2s;border:1px solid;
   -webkit-tap-highlight-color:transparent;background:transparent}
 .btn-primary{border-color:rgba(74,240,200,.4);color:var(--accent);background:rgba(74,240,200,.07)}
 .btn-primary:active{background:rgba(74,240,200,.18)}
 .btn-primary:disabled{opacity:.3;cursor:default;pointer-events:none}
+.btn-rec{border-color:rgba(255,107,157,.5);color:var(--accent3);background:rgba(255,107,157,.08);font-size:13px;padding:15px}
+.btn-rec:active{background:rgba(255,107,157,.2)}
+.btn-rec:disabled{opacity:.3;cursor:default;pointer-events:none}
 .btn-ghost{border-color:var(--border);color:var(--dim)}
 .btn-ghost:active{background:var(--surf2)}
-.btn-eye{border-color:rgba(123,143,255,.4);color:var(--accent2);background:rgba(123,143,255,.07)}
-.btn-eye:active{background:rgba(123,143,255,.18)}
-.btn-eye.R{border-color:rgba(255,107,157,.4);color:var(--accent3);background:rgba(255,107,157,.07)}
-.btn-eye.R:active{background:rgba(255,107,157,.18)}
-.btn-eye:disabled{opacity:.3;cursor:default;pointer-events:none}
-.btn-eye.recording{animation:pulse-btn .7s ease-in-out infinite alternate}
-@keyframes pulse-btn{from{opacity:.7}to{opacity:1}}
 .btn-export{border-color:rgba(74,240,200,.25);color:var(--accent);background:rgba(74,240,200,.04);font-size:10px}
-.btn-export:active{background:rgba(74,240,200,.12)}
 .btn-export:disabled{opacity:.3;cursor:default;pointer-events:none}
 
-.orient-btn{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:4px;
-  background:var(--surf2);border:1px solid var(--border);color:var(--dim);cursor:pointer;
-  -webkit-tap-highlight-color:transparent;transition:all .2s}
-.orient-btn.active{border-color:var(--warn);color:var(--warn);background:rgba(255,179,71,.08)}
+/* Debug */
+#debugPanel{display:none;font-family:var(--mono);font-size:9px;color:var(--dim);
+  background:var(--surf2);border:1px solid var(--border);border-radius:6px;
+  padding:8px 10px;line-height:1.9}
+#debugPanel .dlbl{color:var(--warn);font-size:10px;margin-bottom:2px}
 
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
   background:rgba(74,240,200,.1);border:1px solid var(--accent);border-radius:8px;
@@ -142,110 +111,67 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 <body>
 <div id="app">
   <header>
-    <div class="logo">Iris<span>Calib</span></div>
-    <span class="badge">v1</span>
-    <div style="font-family:var(--mono);font-size:11px;color:var(--dim)">iris ruler</div>
+    <div class="logo">Iris<span>Measure</span></div>
     <div class="pill"><div class="dot" id="dot"></div><span id="stxt">IDLE</span></div>
   </header>
 
   <div id="camwrap">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay"></canvas>
-    <canvas id="tapCanvas"></canvas>
   </div>
 
   <div id="panel">
 
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <div class="steps">
-        <div class="step active" id="s1">1 CAL-L</div>
-        <span class="sep">›</span>
-        <div class="step" id="s2">2 REC-L</div>
-        <span class="sep">›</span>
-        <div class="step" id="s3">3 CAL-R</div>
-        <span class="sep">›</span>
-        <div class="step" id="s4">4 REC-R</div>
+    <div id="instr">Tap <span>▶ START</span> then look straight at the camera.</div>
+
+    <!-- Recording ring -->
+    <div id="recRing">
+      <div class="ring-wrap">
+        <svg width="80" height="80" viewBox="0 0 80 80">
+          <circle class="ring-bg"   cx="40" cy="40" r="35"/>
+          <circle class="ring-fill" cx="40" cy="40" r="35" id="ringFill"/>
+        </svg>
+        <div class="ring-time" id="ringTime">30</div>
       </div>
-      <div id="detbadge" class="none">NO SCALE</div>
+      <div class="ring-label">● RECORDING</div>
+      <div class="ring-counts" id="ringCounts">0 samples</div>
     </div>
 
-    <div id="instr">Tap <span>▶ START CAMERA</span> then follow the steps to calibrate with a credit card.</div>
-
-    <div id="tapProgress">
-      <div class="tpdot" id="td0"></div>
-      <div class="tpdot" id="td1"></div>
-      <div class="tpdot" id="td2"></div>
-      <div class="tpdot" id="td3"></div>
-      <span id="tapMsg">tap card edges</span>
-    </div>
-
-    <div id="scalebox">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
-        <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">CARD ORIENT:</span>
-        <button class="orient-btn active" id="orientLand" onclick="setOrient('land')">━ LANDSCAPE 85.6mm</button>
-        <button class="orient-btn" id="orientPort" onclick="setOrient('port')">┃ PORTRAIT 53.98mm</button>
-      </div>
-      <div style="font-family:var(--mono);font-size:11px;color:var(--dim)">
-        scale: <span id="scaleVal">—</span> mm/px &nbsp;|&nbsp; card: <span id="cardPxVal">—</span> px wide
-      </div>
-    </div>
-
+    <!-- Results -->
     <div class="rrow">
       <div class="rcard L">
         <div class="rlbl">LEFT IRIS</div>
         <div class="rval pending" id="valL">—</div>
         <div class="runit" id="unitL">not measured</div>
-        <div class="rci" id="ciL"></div>
-        <div class="rn" id="nL"></div>
-        <div class="rci" id="matL" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">landmark: <span>—</span></div>
+        <div class="rci"  id="ciL"></div>
       </div>
       <div class="rcard R">
         <div class="rlbl">RIGHT IRIS</div>
         <div class="rval pending" id="valR">—</div>
         <div class="runit" id="unitR">not measured</div>
-        <div class="rci" id="ciR"></div>
-        <div class="rn" id="nR"></div>
-        <div class="rci" id="matR" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">landmark: <span>—</span></div>
+        <div class="rci"  id="ciR"></div>
       </div>
     </div>
 
-    <!-- Recording progress bar -->
-    <div id="recBar">
-      <div class="recbar-label" id="recLabel">● RECORDING LEFT…</div>
-      <div class="recbar-track"><div class="recbar-fill" id="recFill"></div></div>
-      <div class="recbar-counts" id="recCounts">0.0s / 4s</div>
-    </div>
-
+    <!-- Buttons -->
     <div class="btnrow" id="startRow">
-      <button class="btn btn-primary" id="startBtn">▶ START CAMERA</button>
+      <button class="btn btn-primary" id="startBtn">▶ START</button>
     </div>
-    <div class="btnrow" id="calibBtns" style="display:none">
-      <button class="btn btn-ghost" id="retryBtn">↺ CLEAR</button>
-      <button class="btn btn-primary" id="lockBtn" disabled>⊙ LOCK SCALE</button>
+    <div class="btnrow" id="recRow" style="display:none">
+      <button class="btn btn-rec" id="recBtn" disabled>⏺ RECORD 30s</button>
     </div>
-    <div class="btnrow" id="eyeBtns" style="display:none">
-      <button class="btn btn-eye" id="snapL" disabled>⏺ RECORD LEFT</button>
-      <button class="btn btn-eye R" id="snapR" disabled style="display:none">⏺ RECORD RIGHT</button>
-    </div>
-    <div class="btnrow" id="exportRow" style="display:none">
-      <button class="btn btn-export" id="exportBtn">↓ EXPORT CSV</button>
+    <div class="btnrow" id="actionRow" style="display:none">
+      <button class="btn btn-ghost" id="retryBtn">↺ RETRY</button>
+      <button class="btn btn-export" id="exportBtn" disabled>↓ EXPORT CSV</button>
     </div>
 
-    <!-- Debug panel — shown after first face detected -->
-    <div id="debugPanel" style="display:none;font-family:var(--mono);font-size:9px;color:var(--dim);
-      background:var(--surf2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.8">
-      <div style="color:var(--warn);margin-bottom:2px;font-size:10px">DEBUG</div>
+    <!-- Debug -->
+    <div id="debugPanel">
+      <div class="dlbl">DEBUG</div>
       <div id="dbg1">—</div>
       <div id="dbg2">—</div>
       <div id="dbg3">—</div>
-      <div id="dbg4" style="color:var(--accent2)">lm-scale: —</div>
-      <div id="dbg5" style="color:var(--accent2)">lm iris: —</div>
-      <div id="dbg6" style="color:var(--accent3)">card vs landmark diff: —</div>
-    </div>
-    <div class="btnrow" id="recalibRow" style="display:none">
-      <button class="btn btn-ghost" id="recalibLBtn" style="font-size:10px">↺ REDO CAL-L</button>
-      <button class="btn btn-ghost" id="recalibRBtn" style="font-size:10px;display:none">↺ REDO CAL-R</button>
-      <button class="btn btn-ghost" id="recalibAllBtn" style="font-size:10px">↺ RESTART</button>
+      <div id="dbg4">—</div>
     </div>
 
   </div>
@@ -257,199 +183,291 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.5/dist/face-landmarks-detection.min.js" crossorigin="anonymous"></script>
 <script>
-// $ must be first — used by inline onclick handlers in HTML
 const $ = id => document.getElementById(id);
+const REC_SECS = 30;
+const CIRC = 2 * Math.PI * 35; // SVG ring circumference for r=35
 
-const CARD_MM_LAND = 85.6;
-const CARD_MM_PORT = 53.98;
-const MIN_TAPS = 2;
-const MAX_TAPS = 4;
-const REC_SECS = 4;          // seconds to record per eye
-
-let cardMm = CARD_MM_LAND;   // updated by orient toggle
-
-// Workflow phases: idle → calL → recL → calR → recR → done
-// 'calL'/'calR' = tapping card; 'recL'/'recR' = recording iris frames
-let phase = 'idle';
-
+// ── state ─────────────────────────────────────────────────────────────────────
 const S = {
-  running:false, detector:null,
-  // per-eye card-tap scales (separate calibrations)
-  mmPerPxL:null, mmPerPxR:null,
-  taps:[],
-  liveIrisL:null, liveIrisR:null,
-  irisL:null, irisR:null,
-  // recording state
-  recording: null,       // null | 'L' | 'R'
-  recStart: null,        // Date.now() when recording started
-  samplesL: [],          // card-calibrated samples
-  samplesR: [],
-  matSamplesL: [],       // matrix-derived samples
-  matSamplesR: [],
-  statsL: null,
-  statsR: null,
-  matStatsL: null,
-  matStatsR: null,
-  allRaw: [],
+  running:  false,
+  detector: null,
+  recording: false,
+  recStart:  null,
+  samples:   [],   // {lMm, rMm, scale, asymm} per valid frame
+  statsL:    null,
+  statsR:    null,
+  allRaw:    [],
 };
 
-function setOrient(mode){
-  cardMm = mode==='port' ? CARD_MM_PORT : CARD_MM_LAND;
-  $('orientLand').classList.toggle('active', mode==='land');
-  $('orientPort').classList.toggle('active', mode==='port');
-  // recompute displayed scale if taps already placed
-  if(S.taps.length >= MIN_TAPS){
-    const xs = S.taps.map(t=>t.vx);
-    const pxW = Math.max(...xs)-Math.min(...xs);
-    if(pxW>10){
-      $('scaleVal').textContent = (cardMm/pxW).toFixed(4);
-      $('cardPxVal').textContent = Math.round(pxW);
-    }
-  }
-}
-
-const video    = $('video');
-const overlay  = $('overlay');
-const tapCanvas = $('tapCanvas');
-const octx = overlay.getContext('2d');
-const tctx = tapCanvas.getContext('2d');
+const video   = $('video');
+const overlay = $('overlay');
+const octx    = overlay.getContext('2d');
 
 const toast = msg => {
   const t=$('toast'); t.textContent=msg;
-  t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800);
+  t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3000);
 };
-const setStatus = (txt,mode='') => {
+const setStatus = (txt, mode='') => {
   $('stxt').textContent=txt;
   $('dot').className='dot'+(mode?' '+mode:'');
 };
 
-function resizeCanvases(){
+// ── canvas sizing ─────────────────────────────────────────────────────────────
+function resizeCanvas(){
   const w=$('camwrap').clientWidth, h=$('camwrap').clientHeight;
-  [overlay,tapCanvas].forEach(c=>{ if(c.width!==w||c.height!==h){c.width=w;c.height=h;} });
+  if(overlay.width!==w||overlay.height!==h){ overlay.width=w; overlay.height=h; }
 }
 
-// ── coordinate helpers (all in CSS canvas pixels) ─────────────────────────────
-// Map video coords → canvas CSS pixels (accounts for object-fit:cover + mirror)
-function videoPxToCanvasPx(vx, vy){
+// ── coordinate mapping (mirrored video) ───────────────────────────────────────
+function videoPxToCanvas(vx, vy){
   const W=overlay.width, H=overlay.height;
   const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  // cover scale: which axis fills first
-  const sc = Math.max(W/vw, H/vh);
-  const offX = (W - vw*sc)/2;
-  const offY = (H - vh*sc)/2;
-  // Mirror: flip in video space first (vw-vx), then project — avoids offX sign issues
-  const cx = (vw - vx)*sc + offX;
-  const cy = vy*sc + offY;
-  return {cx, cy};
+  const sc=Math.max(W/vw, H/vh);
+  const offX=(W-vw*sc)/2, offY=(H-vh*sc)/2;
+  return { cx:(vw-vx)*sc+offX, cy:vy*sc+offY };
 }
-
-// The scale we care about: canvas CSS px per video px (same sc used above)
 function canvasScale(){
   const W=overlay.width, H=overlay.height;
   const vw=video.videoWidth||1280, vh=video.videoHeight||720;
   return Math.max(W/vw, H/vh);
 }
 
-// ── tap handling (store in VIDEO pixels — stable regardless of canvas size) ───
-function handleTap(e){
-  if(phase!=='calL' && phase!=='calR') return;
-  e.preventDefault();
-  const r = tapCanvas.getBoundingClientRect();
-  const src = e.touches ? e.touches[0] : e;
-  const cssx = src.clientX - r.left;
-  const cssy = src.clientY - r.top;
-  // Convert CSS px → video px for stable storage
-  const sc = canvasScale();
-  const W = overlay.width;
-  const vw = video.videoWidth||1280, vh = video.videoHeight||720;
-  const offX = (W - vw*sc)/2;
-  // Mirror inversion: reverse the (vw-vx)*sc+offX formula → vx = vw - (cssx - offX)/sc
-  const vx = vw - (cssx - offX) / sc;
-  const vy = (cssy - (overlay.height - vh*sc)/2) / sc;
-  S.taps.push({vx, vy, cx:cssx, cy:cssy});
-  if(S.taps.length > MAX_TAPS) S.taps.shift();
-  updateTapUI();
-}
-tapCanvas.addEventListener('touchstart', handleTap, {passive:false});
-tapCanvas.addEventListener('pointerdown', e => {
-  if(e.pointerType==='touch') return;
-  handleTap(e);
-});
-
-function updateTapUI(){
-  const n = S.taps.length;
-  for(let i=0;i<MAX_TAPS;i++) $('td'+i).classList.toggle('filled', i<n);
-  $('tapMsg').textContent = n < MIN_TAPS
-    ? `tap ${MIN_TAPS-n} more point${MIN_TAPS-n!==1?'s':''} on the card`
-    : n < MAX_TAPS ? `${n} taps — add more or lock`
-    : `${n} taps — ready to lock`;
-  if(n >= MIN_TAPS){
-    $('lockBtn').disabled = false;
-    const xs = S.taps.map(t=>t.vx);
-    const vidPxW = Math.max(...xs)-Math.min(...xs);
-    if(vidPxW>5){
-      $('scaleVal').textContent = (cardMm/vidPxW).toFixed(4);
-      $('cardPxVal').textContent = Math.round(vidPxW);
-    }
-  }
-  drawTapMarkers();
-}
-
-function drawTapMarkers(){
-  const W=tapCanvas.width, H=tapCanvas.height;
-  tctx.clearRect(0,0,W,H);
-  if(!S.taps.length) return;
-  // Re-project from stable video coords at current canvas size (fix for resize drift)
-  const projected = S.taps.map(t => {
-    const {cx, cy} = videoPxToCanvasPx(t.vx, t.vy);
-    return {cx, cy, vx: t.vx};
-  });
-  projected.forEach((t,i)=>{
-    tctx.beginPath(); tctx.arc(t.cx,t.cy,13,0,Math.PI*2);
-    tctx.fillStyle='rgba(255,179,71,.18)'; tctx.fill();
-    tctx.strokeStyle='#ffb347'; tctx.lineWidth=2; tctx.stroke();
-    tctx.fillStyle='#ffb347';
-    tctx.font='bold 10px Space Mono,monospace';
-    tctx.textAlign='center'; tctx.textBaseline='middle';
-    tctx.fillText(i+1, t.cx, t.cy);
-  });
-  if(projected.length >= 2){
-    const sorted = [...projected].sort((a,b)=>a.cx-b.cx);
-    const x0=sorted[0].cx, x1=sorted[sorted.length-1].cx;
-    const y = (sorted[0].cy + sorted[sorted.length-1].cy)/2;
-    tctx.beginPath(); tctx.moveTo(x0,y); tctx.lineTo(x1,y);
-    tctx.strokeStyle='rgba(255,179,71,.5)'; tctx.lineWidth=1.5;
-    tctx.setLineDash([5,4]); tctx.stroke(); tctx.setLineDash([]);
-    const vidW = Math.abs(sorted[sorted.length-1].vx - sorted[0].vx);
-    tctx.fillStyle='#ffb347';
-    tctx.font='10px Space Mono,monospace';
-    tctx.textAlign='center'; tctx.textBaseline='bottom';
-    tctx.fillText(`${Math.round(vidW)}vid-px → ${(cardMm/vidW).toFixed(3)}mm/px`, (x0+x1)/2, y-8);
-  }
-}
-
-// ── iris helper ───────────────────────────────────────────────────────────────
-function irisRadius(kps,ci,es){
+// ── iris radius in video pixels ───────────────────────────────────────────────
+// MediaPipe refined landmarks: center=468(L)/473(R), 4 edge pts at 469-472/474-477
+function irisRadius(kps, ci, es){
   let s=0;
-  for(let i=es;i<es+4;i++) s+=Math.hypot(kps[i].x-kps[ci].x,kps[i].y-kps[ci].y);
+  for(let i=es;i<es+4;i++) s+=Math.hypot(kps[i].x-kps[ci].x, kps[i].y-kps[ci].y);
   return s/4;
 }
+
+// ── landmark-based scale estimator ───────────────────────────────────────────
+// Weighted least squares over known inter-landmark distances.
+// Weight = 1/sigma^2 where sigma = population std dev of that distance.
+const ANCHORS = [
+  // [idxA, idxB, meanMm, sigmaMm]
+  [356, 127, 90.0, 4.5],   // outer canthus to outer canthus  (most reliable)
+  [362, 133, 33.0, 2.5],   // inner canthus to inner canthus
+  [263, 362, 30.0, 2.0],   // left eye fissure width
+  [ 33, 133, 30.0, 2.0],   // right eye fissure width
+  [129, 358, 35.0, 3.5],   // nose alare width (more ethnic variance)
+];
+
+function estimateScale(kps){
+  // Yaw guard: compare each outer canthus distance to face midpoint.
+  // If one side is >1.6x the other, face is too rotated — return null.
+  const midX  = (kps[468].x + kps[473].x) / 2;
+  const lDist = Math.abs(midX - kps[356].x);
+  const rDist = Math.abs(midX - kps[127].x);
+  const asymm = Math.max(lDist,rDist) / (Math.min(lDist,rDist) + 0.1);
+  if(asymm > 1.6) return null;
+
+  let num=0, den=0;
+  for(const [a,b,meanMm,sigmaMm] of ANCHORS){
+    const d = Math.hypot(kps[a].x-kps[b].x, kps[a].y-kps[b].y);
+    if(d < 5) continue;
+    const w = 1/(sigmaMm*sigmaMm);
+    num += (meanMm/d) * w;
+    den += w;
+  }
+  return den===0 ? null : { mmPerPx: num/den, asymm };
+}
+
+// ── statistics ────────────────────────────────────────────────────────────────
+function computeStats(arr){
+  const n = arr.length;
+  if(n<2) return null;
+  const mean = arr.reduce((a,b)=>a+b,0)/n;
+  const variance = arr.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
+  const se = Math.sqrt(variance/n);
+  const t = n>=120?1.980:n>=60?2.000:n>=30?2.042:n>=20?2.093:n>=10?2.228:2.776;
+  return {mean, ci:t*se, n, se};
+}
+
+// ── progress ring ─────────────────────────────────────────────────────────────
+function updateRing(elapsed){
+  const pct = Math.min(1, elapsed / (REC_SECS*1000));
+  const remaining = Math.max(0, Math.ceil((REC_SECS*1000 - elapsed)/1000));
+  $('ringFill').style.strokeDashoffset = (CIRC*(1-pct)).toFixed(2);
+  $('ringTime').textContent = remaining;
+  $('ringCounts').textContent = `${S.samples.length} samples`;
+}
+
+// ── finalize recording ────────────────────────────────────────────────────────
+function finalize(){
+  S.recording=false; S.recStart=null;
+  $('recRing').style.display='none';
+
+  const lArr = S.samples.map(s=>s.lMm);
+  const rArr = S.samples.map(s=>s.rMm);
+  S.statsL = computeStats(lArr);
+  S.statsR = computeStats(rArr);
+
+  if(!S.statsL && !S.statsR){
+    toast('Too few valid frames — try again');
+    setStatus('READY','on');
+    return;
+  }
+
+  const fmt  = st => st ? st.mean.toFixed(2) : '—';
+  const ci   = st => st ? `95% CI ±${st.ci.toFixed(2)}mm  n=${st.n}` : '';
+
+  $('valL').textContent = fmt(S.statsL); $('valL').className = S.statsL ? 'rval' : 'rval pending';
+  $('valR').textContent = fmt(S.statsR); $('valR').className = S.statsR ? 'rval' : 'rval pending';
+  $('unitL').textContent = S.statsL ? 'mm  ✓ averaged' : 'not measured';
+  $('unitR').textContent = S.statsR ? 'mm  ✓ averaged' : 'not measured';
+  $('ciL').innerHTML = S.statsL ? `<span>${ci(S.statsL)}</span>` : '';
+  $('ciR').innerHTML = S.statsR ? `<span>${ci(S.statsR)}</span>` : '';
+
+  if(S.statsL && S.statsR){
+    const diff   = Math.abs(S.statsL.mean - S.statsR.mean);
+    const larger = S.statsL.mean >= S.statsR.mean ? 'LEFT' : 'RIGHT';
+    $('instr').innerHTML =
+      `<span>${larger}</span> larger by <span>${diff.toFixed(2)}mm</span>`+
+      ` &nbsp;·&nbsp; L:${S.statsL.mean.toFixed(2)} R:${S.statsR.mean.toFixed(2)}mm`;
+  }
+
+  setStatus('DONE','on');
+  $('exportBtn').disabled = false;
+  $('actionRow').style.display = 'flex';
+  $('recRow').style.display = 'none';
+  toast(`Done — ${S.samples.length} frames averaged`);
+}
+
+// ── render loop ───────────────────────────────────────────────────────────────
+async function loop(){
+  if(!S.running){ requestAnimationFrame(loop); return; }
+  if(video.readyState<2){ requestAnimationFrame(loop); return; }
+
+  resizeCanvas();
+  octx.clearRect(0,0,overlay.width,overlay.height);
+
+  try{
+    const faces = await S.detector.estimateFaces(video, {flipHorizontal:false});
+
+    if(faces.length){
+      let kps = faces[0].keypoints;
+      const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+      // Normalize to video pixels if landmarks are 0-1
+      if(Math.max(...kps.slice(0,10).map(p=>p.x)) < 2)
+        kps = kps.map(p=>({x:p.x*vw, y:p.y*vh}));
+
+      if(kps.length >= 478){
+        const sc      = canvasScale();
+        const lRadVid = irisRadius(kps, 468, 469);
+        const rRadVid = irisRadius(kps, 473, 474);
+        const lmScale = estimateScale(kps);
+
+        const lMm = lmScale ? lRadVid*2*lmScale.mmPerPx : null;
+        const rMm = lmScale ? rRadVid*2*lmScale.mmPerPx : null;
+        const frontal = !!lmScale;
+
+        // ── debug ─────────────────────────────────────────────────────────
+        $('debugPanel').style.display = '';
+        $('dbg1').textContent = `video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  sc:${sc.toFixed(4)}`;
+        $('dbg2').textContent = `lRad:${lRadVid.toFixed(2)}px  rRad:${rRadVid.toFixed(2)}px`;
+        $('dbg3').textContent = lmScale
+          ? `scale:${lmScale.mmPerPx.toFixed(5)}mm/px  asymm:${lmScale.asymm.toFixed(2)}`
+          : 'scale: — face not frontal';
+        $('dbg4').textContent = `L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm  samples:${S.samples.length}`;
+
+        // ── draw iris circles ─────────────────────────────────────────────
+        [[468, '#7b8fff', lRadVid*sc, lMm, 'L'],
+         [473, '#ff6b9d', rRadVid*sc, rMm, 'R']]
+        .forEach(([ci, col, radCss, mm, side])=>{
+          const {cx,cy} = videoPxToCanvas(kps[ci].x, kps[ci].y);
+          octx.beginPath(); octx.arc(cx, cy, radCss, 0, Math.PI*2);
+          octx.strokeStyle = col;
+          octx.lineWidth   = S.recording ? 2.5 : 1.5;
+          octx.globalAlpha = S.recording ? 1.0 : 0.55;
+          octx.stroke();
+          octx.globalAlpha = 1;
+          // center dot
+          octx.beginPath(); octx.arc(cx, cy, 3, 0, Math.PI*2);
+          octx.fillStyle = col; octx.fill();
+          // label
+          if(mm){
+            octx.fillStyle    = col;
+            octx.font         = 'bold 11px Space Mono,monospace';
+            octx.textAlign    = 'center';
+            octx.textBaseline = 'bottom';
+            octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-radCss-4);
+          }
+        });
+
+        // ── live card update (pre-record) ─────────────────────────────────
+        if(!S.statsL && lMm){
+          $('valL').textContent = lMm.toFixed(2); $('valL').className = 'rval';
+          $('unitL').textContent = 'mm  live';
+        }
+        if(!S.statsR && rMm){
+          $('valR').textContent = rMm.toFixed(2); $('valR').className = 'rval';
+          $('unitR').textContent = 'mm  live';
+        }
+
+        // ── record ────────────────────────────────────────────────────────
+        if(S.recording && S.recStart){
+          const elapsed = Date.now() - S.recStart;
+          updateRing(elapsed);
+          if(lMm && rMm){
+            S.samples.push({lMm, rMm, scale:lmScale.mmPerPx, asymm:lmScale.asymm});
+            S.allRaw.push({t:Date.now(), lMm, rMm, scale:lmScale.mmPerPx, asymm:lmScale.asymm});
+          }
+          if(elapsed >= REC_SECS*1000){
+            S.recording = false;
+            finalize();
+          }
+        }
+
+        // Enable record button only when face is frontal
+        $('recBtn').disabled = !frontal;
+        setStatus(S.recording ? 'RECORDING' : 'TRACKING', S.recording ? 'rec' : 'on');
+
+      }
+    } else {
+      setStatus('NO FACE','warn');
+      $('recBtn').disabled = true;
+    }
+  } catch(e){ console.warn('[IrisMeasure] loop error:', e); }
+
+  requestAnimationFrame(loop);
+}
+
+// ── start button ──────────────────────────────────────────────────────────────
+$('startBtn').onclick = async () => {
+  $('startBtn').disabled=true; $('startBtn').textContent='Starting…';
+  setStatus('CAMERA…','warn');
+  try{ await startCamera(); }
+  catch(e){
+    toast('Camera denied — check permissions');
+    $('startBtn').disabled=false; $('startBtn').textContent='▶ START'; return;
+  }
+  setStatus('LOADING…','warn'); $('startBtn').textContent='Loading model…';
+  try{ await loadModel(); }
+  catch(e){
+    toast('Model error: '+(e.message||e));
+    setStatus('ERROR','warn');
+    $('startBtn').disabled=false; $('startBtn').textContent='▶ RETRY'; return;
+  }
+  S.running=true;
+  $('startRow').style.display='none';
+  $('recRow').style.display='flex';
+  resizeCanvas();
+  requestAnimationFrame(loop);
+  $('instr').innerHTML=`Look straight at camera — record button enables when both irises are detected.`;
+  setStatus('READY','on');
+};
 
 // ── camera + model ────────────────────────────────────────────────────────────
 async function startCamera(){
   const stream = await navigator.mediaDevices.getUserMedia({
-    video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}
+    video:{facingMode:'user', width:{ideal:1280}, height:{ideal:720}}
   });
   video.srcObject = stream;
   return new Promise(res=>{
-    video.onloadedmetadata = () => {
+    video.onloadedmetadata = ()=>{
       video.play();
-      // Wait until we actually have frame dimensions (videoWidth > 0)
-      const waitForSize = () => {
-        if(video.videoWidth > 0) { res(); }
-        else { requestAnimationFrame(waitForSize); }
-      };
-      waitForSize();
+      const wait=()=>{ video.videoWidth>0 ? res() : requestAnimationFrame(wait); };
+      wait();
     };
   });
 }
@@ -462,466 +480,63 @@ async function loadModel(){
   );
 }
 
-// ── landmark geometry scale estimator ────────────────────────────────────────
-// Each entry: [idxA, idxB, meanMm, sigmaMm]
-// Lower sigma = tighter population distribution = higher weight
-// Sources: anthropometric literature, averaged across sex/ethnicity
-const SCALE_ANCHORS = [
-  // Outer canthus to outer canthus (most reliable bone-to-bone)
-  [356, 127, 90.0, 4.5],
-  // Inner canthus to inner canthus
-  [362, 133, 33.0, 2.5],  // actually use medial canthus landmarks
-  // Left eye fissure width (inner to outer canthus, left eye)
-  [362, 263, 30.0, 2.0],
-  // Right eye fissure width
-  [133, 33,  30.0, 2.0],
-  // Nose wing to nose wing (alare width) — more ethnic variance, lower weight
-  [129, 358, 35.0, 3.5],
-  // Bitragion width (ear to ear via forehead) — large, stable
-  // Not great landmarks in face mesh, skip
-];
-
-function landmarkDistPx(kps, a, b){
-  return Math.hypot(kps[a].x - kps[b].x, kps[a].y - kps[b].y);
-}
-
-// Returns mm/px estimate from weighted combination of anchors
-// Returns null if face not frontal enough (yaw too large)
-function landmarkScaleEstimate(kps){
-  // Rough yaw check: compare left vs right eye x positions
-  // If strongly asymmetric, foreshortening makes anchors unreliable
-  const lEyeX = kps[468].x;  // left iris center
-  const rEyeX = kps[473].x;  // right iris center
-  const midX  = (lEyeX + rEyeX) / 2;
-  const frameW = Math.max(...kps.slice(0,10).map(p=>p.x)) * 1.1; // approx
-  // Simple symmetry check: mid should be near center of face bbox
-  // Use outer canthus x distance asymmetry instead
-  const lOuter = kps[356].x, rOuter = kps[127].x;
-  const lInner = kps[362].x, rInner = kps[133].x;  // rough
-  // If one side is more than 2x the other, skip
-  const lHalf = Math.abs(midX - lOuter);
-  const rHalf = Math.abs(midX - rOuter);
-  const asymm = Math.max(lHalf,rHalf) / (Math.min(lHalf,rHalf) + 1);
-  if(asymm > 1.8) return null;  // too much yaw
-
-  let num = 0, den = 0;
-  const details = [];
-  for(const [a, b, meanMm, sigmaMm] of SCALE_ANCHORS){
-    const distPx = landmarkDistPx(kps, a, b);
-    if(distPx < 5) continue;  // landmark probably collapsed
-    const w = 1 / (sigmaMm * sigmaMm);
-    // mm/px for this anchor
-    const mmPerPx = meanMm / distPx;
-    num += mmPerPx * w;
-    den += w;
-    details.push({a, b, distPx: distPx.toFixed(1), mmPerPx: mmPerPx.toFixed(5), w: w.toFixed(4)});
-  }
-  if(den === 0) return null;
-  return { mmPerPx: num/den, asymm, details };
-}
-
-// ── render loop ───────────────────────────────────────────────────────────────
-async function loop(){
-  if(!S.running){ requestAnimationFrame(loop); return; }
-  if(video.readyState<2){ requestAnimationFrame(loop); return; }
-
-  resizeCanvases();
-  octx.clearRect(0,0,overlay.width,overlay.height);
-
-  if(S.detector){
-    try{
-      const faces = await S.detector.estimateFaces(video,{flipHorizontal:false});
-      if(faces.length){
-        let kps = faces[0].keypoints;
-        const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-
-        // Normalize 0-1 coords to video pixels if needed
-        const maxX = Math.max(...kps.slice(0,10).map(p=>p.x));
-        if(maxX < 2) kps = kps.map(p=>({x:p.x*vw, y:p.y*vh}));
-
-        if(kps.length >= 478){
-          const sc = canvasScale();
-          const lRadVid = irisRadius(kps, 468, 469);
-          const rRadVid = irisRadius(kps, 473, 474);
-          const lRad = lRadVid * sc;
-          const rRad = rRadVid * sc;
-
-          // ── Method A: card-calibrated ─────────────────────────────────────
-          const lMmCard = S.mmPerPxL ? lRadVid*2*S.mmPerPxL : null;
-          const rMmCard = S.mmPerPxR ? rRadVid*2*S.mmPerPxR : null;
-
-          // ── Method B: landmark geometry estimate ──────────────────────────
-          const lmScale = landmarkScaleEstimate(kps);
-          let lMmLm = null, rMmLm = null;
-          if(lmScale){
-            lMmLm = lRadVid * 2 * lmScale.mmPerPx;
-            rMmLm = rRadVid * 2 * lmScale.mmPerPx;
-          }
-
-          // Best available for display (card preferred, landmark fallback)
-          const lMm = lMmCard ?? lMmLm;
-          const rMm = rMmCard ?? rMmLm;
-
-          if(lMm) S.liveIrisL = lMm;
-          if(rMm) S.liveIrisR = rMm;
-
-          // ── Debug panel ───────────────────────────────────────────────────
-          $('debugPanel').style.display='';
-          $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  sc:${sc.toFixed(4)}`;
-          $('dbg2').textContent=`lRadVid:${lRadVid.toFixed(2)}  rRadVid:${rRadVid.toFixed(2)}`;
-          $('dbg3').textContent=`card  L:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  R:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} mm/px`;
-          if(lmScale){
-            $('dbg4').textContent=`lm-scale: ${lmScale.mmPerPx.toFixed(5)} mm/px  asymm:${lmScale.asymm.toFixed(2)}`;
-            $('dbg5').textContent=`lm L:${lMmLm?lMmLm.toFixed(2):'—'}mm  R:${rMmLm?rMmLm.toFixed(2):'—'}mm`;
-          } else {
-            $('dbg4').textContent='lm-scale: — (face not frontal)';
-            $('dbg5').textContent='lm L:—  R:—';
-          }
-          if(lMmCard && lMmLm){
-            $('dbg6').textContent=`card−lm  L:${(lMmCard-lMmLm).toFixed(2)}mm  R:${rMmCard&&rMmLm?(rMmCard-rMmLm).toFixed(2):'—'}mm`;
-          } else {
-            $('dbg6').textContent='card−lm: need both active';
-          }
-
-          // ── Draw iris circles ─────────────────────────────────────────────
-          [[468,'#7b8fff',lRad,lMm,lMmCard,lMmLm,'L'],
-           [473,'#ff6b9d',rRad,rMm,rMmCard,rMmLm,'R']]
-          .forEach(([ci,col,rad,mm,mmCard,mmLm,side])=>{
-            if(!mm) return;
-            const {cx,cy} = videoPxToCanvasPx(kps[ci].x, kps[ci].y);
-            const isActive = S.recording===side;
-            octx.beginPath(); octx.arc(cx,cy,rad,0,Math.PI*2);
-            octx.strokeStyle=col; octx.lineWidth=isActive?3:1.5;
-            octx.globalAlpha=isActive?1:0.5;
-            octx.stroke(); octx.globalAlpha=1;
-            octx.beginPath(); octx.arc(cx,cy,3,0,Math.PI*2);
-            octx.fillStyle=col; octx.fill();
-            octx.fillStyle=col;
-            octx.font='bold 11px Space Mono,monospace';
-            octx.textAlign='center'; octx.textBaseline='bottom';
-            const cardTxt = mmCard ? `C:${mmCard.toFixed(1)}` : '';
-            const lmTxt   = mmLm   ? `L:${mmLm.toFixed(1)}`   : '';
-            const label   = [cardTxt, lmTxt].filter(Boolean).join(' ');
-            octx.fillText(`${side} ${label}mm`, cx, cy-rad-4);
-          });
-
-          // ── Live display ──────────────────────────────────────────────────
-          if(lMm && !S.statsL){
-            $('valL').textContent=lMm.toFixed(2); $('valL').className='rval';
-            $('unitL').textContent=(lMmCard?'card':'landmark')+' live';
-          }
-          if(rMm && !S.statsR){
-            $('valR').textContent=rMm.toFixed(2); $('valR').className='rval';
-            $('unitR').textContent=(rMmCard?'card':'landmark')+' live';
-          }
-          if(lMmLm) $('matL').innerHTML=`landmark: <span>${lMmLm.toFixed(2)}mm</span>`;
-          if(rMmLm) $('matR').innerHTML=`landmark: <span>${rMmLm.toFixed(2)}mm</span>`;
-
-          // ── Recording ─────────────────────────────────────────────────────
-          const inMeasure = (phase==='recL'||phase==='recR');
-          if(inMeasure && S.recording && S.recStart){
-            const now = Date.now();
-            const elapsed = now - S.recStart;
-            const pct = Math.min(1, elapsed / (REC_SECS*1000));
-            updateRecBar(S.recording, pct);
-            if(S.recording==='L'){
-              if(lMmCard){ S.samplesL.push(lMmCard);   S.allRaw.push({t:now,side:'L',method:'card',    mm:lMmCard,scale:S.mmPerPxL}); }
-              if(lMmLm)  { S.matSamplesL.push(lMmLm);  S.allRaw.push({t:now,side:'L',method:'landmark',mm:lMmLm,  scale:lmScale.mmPerPx}); }
-            } else if(S.recording==='R'){
-              if(rMmCard){ S.samplesR.push(rMmCard);   S.allRaw.push({t:now,side:'R',method:'card',    mm:rMmCard,scale:S.mmPerPxR}); }
-              if(rMmLm)  { S.matSamplesR.push(rMmLm);  S.allRaw.push({t:now,side:'R',method:'landmark',mm:rMmLm,  scale:lmScale.mmPerPx}); }
-            }
-            const sArr = S.recording==='L' ? S.samplesL    : S.samplesR;
-            const mArr = S.recording==='L' ? S.matSamplesL : S.matSamplesR;
-            if(sArr.length>0||mArr.length>0){
-              const cMean = sArr.length ? (sArr.reduce((a,b)=>a+b,0)/sArr.length).toFixed(2) : '—';
-              const mMean = mArr.length ? (mArr.reduce((a,b)=>a+b,0)/mArr.length).toFixed(2) : '—';
-              $('dbg3').textContent=`card n=${sArr.length} mean=${cMean}  lm n=${mArr.length} mean=${mMean}`;
-            }
-            if(elapsed >= REC_SECS*1000){
-              const doneSide = S.recording;
-              S.recording = null;
-              finalizeEye(doneSide);
-            }
-          }
-          setStatus('TRACKING','on');
-        }
-      } else { setStatus('NO FACE','warn'); }
-    } catch(e){ console.warn('[IrisCalib] loop error:',e); }
-  }
-
-  requestAnimationFrame(loop);
-}
-
-// ── workflow helpers ──────────────────────────────────────────────────────────
-function enterCalPhase(side){
-  phase = side==='L' ? 'calL' : 'calR';
-  S.taps=[]; S.recording=null; S.recStart=null;
-  setStatus('TAP CARD','warn');
-  $('recBar').style.display='none';
-  $('eyeBtns').style.display='none';
-  $('calibBtns').style.display='flex';
-  $('tapProgress').style.display='flex';
-  $('lockBtn').disabled=true;
-  $('scaleVal').textContent='—'; $('cardPxVal').textContent='—';
-  tapCanvas.style.pointerEvents='';
-  tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
-  updateTapUI();
-  // Mirror note: video is scaleX(-1), so LEFT side of screen = user's RIGHT eye.
-  const eye = side==='L' ? 'LEFT' : 'RIGHT';            // screen-side label
-  const userEye = side==='L' ? 'YOUR RIGHT' : 'YOUR LEFT'; // anatomical label
-  const pos = side==='L'
-    ? 'right cheek/temple — card on LEFT side of screen (your RIGHT eye)'
-    : 'left cheek/temple — card on RIGHT side of screen (your LEFT eye)';
-  $('detbadge').className='none';
-  $('detbadge').textContent=`NO SCALE  ${eye} SCREEN = ${userEye} EYE`;
-  $('instr').innerHTML=`<span>${eye} SCREEN (${userEye} EYE) CAL</span> — card flat at <span>eye depth</span>, ${pos}. Pick orientation below, tap <span>2–4 points</span> across full card width.`;
-}
-
-function enterRecPhase(side){
-  phase = side==='L' ? 'recL' : 'recR';
-  S.recording=null; S.recStart=null;
-  if(side==='L'){ S.samplesL=[]; S.matSamplesL=[]; }
-  else           { S.samplesR=[]; S.matSamplesR=[]; }
-  setStatus('MEASURING','on');
-  $('calibBtns').style.display='none';
-  $('tapProgress').style.display='none';
-  $('eyeBtns').style.display='flex';
-  $('recalibRow').style.display='flex';
-  tapCanvas.style.pointerEvents='none';
-  tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
-  // Show only the relevant button
-  $('snapL').style.display = side==='L' ? '' : 'none';
-  $('snapR').style.display = side==='R' ? '' : 'none';
-  $('snapL').disabled = side!=='L';
-  $('snapR').disabled = side!=='R';
-  // Redo-cal buttons
-  $('recalibLBtn').style.display = side==='L' ? '' : 'none';
-  $('recalibRBtn').style.display = side==='R' ? '' : 'none';
-  $('recalibAllBtn').style.display = '';
-  const eye = side==='L' ? 'LEFT' : 'RIGHT';
-  const userEye = side==='L' ? 'RIGHT' : 'LEFT';
-  $('instr').innerHTML=`Look straight at camera. Tap <span>RECORD ${eye}</span> to measure your <span>${userEye} EYE</span> (${eye} side of screen) — hold still for <span>${REC_SECS}s</span>.`;
-}
-
-// ── buttons ───────────────────────────────────────────────────────────────────
-$('startBtn').onclick = async () => {
-  $('startBtn').disabled=true; $('startBtn').textContent='Starting…';
-  setStatus('CAMERA…','warn');
-  try{ await startCamera(); }
-  catch(e){
-    toast('Camera denied — check permissions');
-    $('startBtn').disabled=false; $('startBtn').textContent='▶ START CAMERA'; return;
-  }
-  setStatus('LOADING…','warn'); $('startBtn').textContent='Loading model…';
-  try{ await loadModel(); }
-  catch(e){
-    console.error('[IrisCalib] loadModel failed:', e);
-    toast('Model error: '+(e.message||e));
-    setStatus('ERROR','warn');
-    $('startBtn').disabled=false; $('startBtn').textContent='▶ RETRY';
-    return;
-  }
-  S.running=true;
-  $('startRow').style.display='none';
-  $('s1').classList.add('active');
-  resizeCanvases();
-  requestAnimationFrame(loop);
-  enterCalPhase('L');
+// ── record button ─────────────────────────────────────────────────────────────
+$('recBtn').onclick = ()=>{
+  if(S.recording) return;
+  // reset state
+  S.samples=[]; S.statsL=null; S.statsR=null;
+  $('exportBtn').disabled=true;
+  $('actionRow').style.display='none';
+  ['valL','valR'].forEach(id=>{ $(id).textContent='—'; $(id).className='rval pending'; });
+  $('unitL').textContent='recording…'; $('unitR').textContent='recording…';
+  $('ciL').innerHTML=''; $('ciR').innerHTML='';
+  // start
+  S.recording=true; S.recStart=Date.now();
+  $('recRing').style.display='flex';
+  $('ringFill').style.strokeDashoffset=CIRC;
+  $('ringTime').textContent=REC_SECS;
+  $('ringCounts').textContent='0 samples';
+  $('instr').innerHTML=`Hold still — look straight ahead. <span class="warn">Frames where face turns are discarded automatically.</span>`;
+  toast('Recording — 30s, hold still…');
 };
 
-$('retryBtn').onclick = () => {
-  S.taps=[];
-  $('lockBtn').disabled=true;
-  $('scaleVal').textContent='—'; $('cardPxVal').textContent='—';
-  tctx.clearRect(0,0,tapCanvas.width,tapCanvas.height);
-  updateTapUI();
-  toast('Taps cleared');
-};
-
-$('lockBtn').onclick = () => {
-  if(S.taps.length < MIN_TAPS){ toast('Need at least 2 taps'); return; }
-  const xs = S.taps.map(t=>t.vx);
-  const vidPxW = Math.max(...xs)-Math.min(...xs);
-  if(vidPxW<10){ toast('Taps too close — span the full card width'); return; }
-  const mmPerVidPx = cardMm / vidPxW;
-  const side = phase==='calL' ? 'L' : 'R';
-  if(side==='L') S.mmPerPxL=mmPerVidPx; else S.mmPerPxR=mmPerVidPx;
-  $('scaleVal').textContent = mmPerVidPx.toFixed(4);
-  $('cardPxVal').textContent = Math.round(vidPxW);
-  $('detbadge').className='locked';
-  $('detbadge').textContent=`${side} LOCKED  ${mmPerVidPx.toFixed(4)}mm/vid-px (${Math.round(vidPxW)}px)`;
-  if(side==='L'){ $('s1').className='step done'; $('s2').classList.add('active'); }
-  else          { $('s3').className='step done'; $('s4').classList.add('active'); }
-  toast(`${side==='L'?'Left':'Right'} scale: ${mmPerVidPx.toFixed(4)} mm/px  card=${Math.round(vidPxW)}vid-px`);
-  enterRecPhase(side);
-};
-
-$('recalibLBtn').onclick = () => {
-  S.mmPerPxL=null; S.irisL=null; S.statsL=null; S.matStatsL=null; S.matSamplesL=[];
-  $('s1').className='step active'; $('s2').className='step';
-  $('recalibRow').style.display='none'; $('exportRow').style.display='none';
-  $('valL').textContent='—'; $('valL').className='rval pending';
-  $('unitL').textContent='not measured'; $('ciL').textContent=''; $('nL').textContent='';
-  enterCalPhase('L');
-  toast('Redo left calibration');
-};
-
-$('recalibRBtn').onclick = () => {
-  S.mmPerPxR=null; S.irisR=null; S.statsR=null; S.matStatsR=null; S.matSamplesR=[];
-  $('s3').className='step active'; $('s4').className='step';
-  $('recalibRow').style.display='none'; $('exportRow').style.display='none';
-  $('valR').textContent='—'; $('valR').className='rval pending';
-  $('unitR').textContent='not measured'; $('ciR').textContent=''; $('nR').textContent='';
-  enterCalPhase('R');
-  toast('Redo right calibration');
-};
-
-$('recalibAllBtn').onclick = () => {
-  Object.assign(S, {
-    mmPerPxL:null, mmPerPxR:null, taps:[],
-    recording:null, recStart:null,
-    samplesL:[], samplesR:[], matSamplesL:[], matSamplesR:[],
-    irisL:null, irisR:null,
-    statsL:null, statsR:null, matStatsL:null, matStatsR:null,
-    allRaw:[], _debugLogged:false
-  });
-  ['recalibRow','exportRow','recBar'].forEach(id=>$(''+id).style.display='none');
+// ── retry button ──────────────────────────────────────────────────────────────
+$('retryBtn').onclick = ()=>{
+  S.samples=[]; S.statsL=null; S.statsR=null; S.allRaw=[];
+  S.recording=false; S.recStart=null;
   ['valL','valR'].forEach(id=>{ $(id).textContent='—'; $(id).className='rval pending'; });
   $('unitL').textContent='not measured'; $('unitR').textContent='not measured';
-  $('ciL').textContent=''; $('ciR').textContent='';
-  $('nL').textContent=''; $('nR').textContent='';
-  $('s1').className='step active';
-  $('s2').className='step'; $('s3').className='step'; $('s4').className='step';
-  $('detbadge').className='none'; $('detbadge').textContent='NO SCALE';
-  enterCalPhase('L');
-  toast('Full restart');
+  $('ciL').innerHTML=''; $('ciR').innerHTML='';
+  $('exportBtn').disabled=true;
+  $('actionRow').style.display='none';
+  $('recRow').style.display='flex';
+  $('recRing').style.display='none';
+  $('instr').innerHTML=`Look straight at camera — record button enables when both irises are detected.`;
+  setStatus('READY','on');
+  toast('Cleared — ready to record again');
 };
 
-// ── statistics ────────────────────────────────────────────────────────────────
-function computeStats(arr){
-  const n = arr.length;
-  if(n<2) return null;
-  const mean = arr.reduce((a,b)=>a+b,0)/n;
-  const variance = arr.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
-  const se = Math.sqrt(variance/n);
-  const t = n>=120?1.980 : n>=60?2.000 : n>=30?2.042 : n>=20?2.093 : n>=10?2.228 : 2.776;
-  return {mean, ci:t*se, n, se, variance};
-}
-
-function updateRecBar(side, pct){
-  $('recFill').style.width = (Math.min(1,pct)*100).toFixed(1)+'%';
-  $('recLabel').textContent = `● RECORDING ${side==='L'?'LEFT':'RIGHT'}…`;
-  $('recCounts').textContent = `${(pct*REC_SECS).toFixed(1)}s / ${REC_SECS}s`;
-}
-
-function startRecording(side){
-  if(S.recording) return;
-  S.recording=side; S.recStart=Date.now();
-  if(side==='L') S.samplesL=[]; else S.samplesR=[];
-  $('snapL').disabled=true; $('snapR').disabled=true;
-  $('snapL').classList.toggle('recording',side==='L');
-  $('snapR').classList.toggle('recording',side==='R');
-  $('recBar').style.display='flex';
-  $('recFill').style.width='0%';
-  $('recCounts').textContent=`0.0s / ${REC_SECS}s`;
-  $('recLabel').textContent=`● RECORDING ${side==='L'?'LEFT':'RIGHT'}…`;
-  toast(`Recording ${side==='L'?'left':'right'} iris — hold still…`);
-}
-
-function finalizeEye(side){
-  const samples    = side==='L' ? S.samplesL    : S.samplesR;
-  const matSamples = side==='L' ? S.matSamplesL : S.matSamplesR;
-  const stats    = computeStats(samples);
-  const matStats = computeStats(matSamples);
-  // S.recording already cleared by loop before calling here
-  S.recStart=null;
-  $('snapL').classList.remove('recording'); $('snapR').classList.remove('recording');
-  $('snapL').disabled=false; $('snapR').disabled=false;
-  $('recBar').style.display='none';
-
-  const hasCard   = stats    && stats.n    >= 3;
-  const hasMatrix = matStats && matStats.n >= 3;
-  if(!hasCard && !hasMatrix){ toast('Too few samples — keep face visible, try again'); return; }
-
-  // Primary = card if available, else matrix
-  const primary = hasCard ? stats : matStats;
-  const warn = primary.mean > 15;
-  const warnTxt = warn ? ' ⚠' : '';
-  const method = hasCard ? (hasMatrix ? 'card+matrix' : 'card') : 'matrix';
-
-  if(side==='L'){
-    S.irisL=primary.mean; S.statsL=primary; S.matStatsL=matStats;
-    $('valL').textContent=primary.mean.toFixed(2)+warnTxt; $('valL').className='rval';
-    $('unitL').textContent=`mm ✓ ${method}`;
-    $('ciL').innerHTML=`95% CI: <span>±${primary.ci.toFixed(2)}mm</span>  n=${primary.n}`;
-    $('nL').textContent=hasCard&&hasMatrix?`card:${stats.mean.toFixed(2)} mat:${matStats.mean.toFixed(2)} Δ${Math.abs(stats.mean-matStats.mean).toFixed(2)}mm`:'';
-    $('s2').className='step done'; $('s3').classList.add('active');
-    enterCalPhase('R');
-  } else {
-    S.irisR=primary.mean; S.statsR=primary; S.matStatsR=matStats;
-    $('valR').textContent=primary.mean.toFixed(2)+warnTxt; $('valR').className='rval';
-    $('unitR').textContent=`mm ✓ ${method}`;
-    $('ciR').innerHTML=`95% CI: <span>±${primary.ci.toFixed(2)}mm</span>  n=${primary.n}`;
-    $('nR').textContent=hasCard&&hasMatrix?`card:${stats.mean.toFixed(2)} mat:${matStats.mean.toFixed(2)} Δ${Math.abs(stats.mean-matStats.mean).toFixed(2)}mm`:'';
-    $('s4').className='step done';
-  }
-
-  if(warn) toast(`⚠ ${primary.mean.toFixed(1)}mm seems large — check calibration`);
-  else     toast(`${side==='L'?'Left':'Right'}: ${primary.mean.toFixed(2)} ± ${primary.ci.toFixed(2)}mm [${method}]`);
-
-  if(S.irisL && S.irisR){
-    const diff=Math.abs(S.irisL-S.irisR).toFixed(2);
-    const larger=S.irisL>=S.irisR?'LEFT':'RIGHT';
-    const warnNote = (S.irisL>15||S.irisR>15) ? '  <span style="color:var(--warn)">⚠ recheck calibration</span>' : '';
-    $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff}mm</span> — L:${S.irisL.toFixed(2)} R:${S.irisR.toFixed(2)}mm${warnNote}`;
-    setStatus('COMPLETE','on');
-    $('eyeBtns').style.display='none';
-    $('recalibRow').style.display='flex';
-    $('recalibLBtn').style.display=''; $('recalibRBtn').style.display=''; $('recalibAllBtn').style.display='';
-    $('exportRow').style.display='flex';
-  }
-}
-
-$('snapL').onclick = () => startRecording('L');
-$('snapR').onclick = () => startRecording('R');
-
 // ── CSV export ────────────────────────────────────────────────────────────────
-$('exportBtn').onclick = () => {
+$('exportBtn').onclick = ()=>{
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
-  const rows = ['timestamp_ms,side,method,iris_mm,scale'];
+  const rows = ['timestamp_ms,left_mm,right_mm,scale_mm_per_px,asymm'];
   S.allRaw.forEach(r=>{
-    rows.push(`${r.t},${r.side},${r.method||'card'},${r.mm.toFixed(4)},${r.scale?r.scale.toFixed(6):''}`);
+    rows.push(`${r.t},${r.lMm.toFixed(4)},${r.rMm.toFixed(4)},${r.scale.toFixed(6)},${r.asymm.toFixed(3)}`);
   });
   rows.push('');
   rows.push('# SUMMARY');
-  rows.push('side,method,mean_mm,ci95_mm,n,se_mm');
-  const summarize = (label, stats) => {
-    if(stats) rows.push(`${label},${stats.mean.toFixed(4)},${stats.ci.toFixed(4)},${stats.n},${stats.se.toFixed(4)}`);
-  };
-  summarize('L,card',   S.statsL   && S.mmPerPxL ? S.statsL   : null);
-  summarize('L,matrix', S.matStatsL);
-  summarize('R,card',   S.statsR   && S.mmPerPxR ? S.statsR   : null);
-  summarize('R,matrix', S.matStatsR);
-  if(S.statsL && S.matStatsL) rows.push(`L,delta_card_minus_matrix,${(S.statsL.mean-S.matStatsL.mean).toFixed(4)},,,`);
-  if(S.statsR && S.matStatsR) rows.push(`R,delta_card_minus_matrix,${(S.statsR.mean-S.matStatsR.mean).toFixed(4)},,,`);
-  const blob = new Blob([rows.join('\n')],{type:'text/csv'});
+  rows.push('side,mean_mm,ci95_mm,n,se_mm');
+  if(S.statsL) rows.push(`L,${S.statsL.mean.toFixed(4)},${S.statsL.ci.toFixed(4)},${S.statsL.n},${S.statsL.se.toFixed(4)}`);
+  if(S.statsR) rows.push(`R,${S.statsR.mean.toFixed(4)},${S.statsR.ci.toFixed(4)},${S.statsR.n},${S.statsR.se.toFixed(4)}`);
+  if(S.statsL&&S.statsR) rows.push(`delta,${Math.abs(S.statsL.mean-S.statsR.mean).toFixed(4)},,,`);
+  const blob=new Blob([rows.join('\n')],{type:'text/csv'});
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`iriscalib_${ts}.csv`;
-  a.click();
+  a.href=URL.createObjectURL(blob); a.download=`iris_${ts}.csv`; a.click();
   toast('CSV exported');
 };
 
-window.addEventListener('resize', resizeCanvases);
-resizeCanvases();
-
-if('serviceWorker' in navigator){
-  window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('./sw.js')
-      .catch(e=>console.warn('SW registration failed:',e));
-  });
-}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 </script>
 </body>
 </html>
