@@ -197,7 +197,7 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
         <div class="runit" id="unitL">not measured</div>
         <div class="rci" id="ciL"></div>
         <div class="rn" id="nL"></div>
-        <div class="rci" id="matL" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">matrix: <span>—</span></div>
+        <div class="rci" id="matL" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">landmark: <span>—</span></div>
       </div>
       <div class="rcard R">
         <div class="rlbl">RIGHT IRIS</div>
@@ -205,7 +205,7 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
         <div class="runit" id="unitR">not measured</div>
         <div class="rci" id="ciR"></div>
         <div class="rn" id="nR"></div>
-        <div class="rci" id="matR" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">matrix: <span>—</span></div>
+        <div class="rci" id="matR" style="margin-top:5px;border-top:1px solid var(--border);padding-top:4px">landmark: <span>—</span></div>
       </div>
     </div>
 
@@ -238,9 +238,9 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
       <div id="dbg1">—</div>
       <div id="dbg2">—</div>
       <div id="dbg3">—</div>
-      <div id="dbg4" style="color:var(--accent2)">matrix scale: —</div>
-      <div id="dbg5" style="color:var(--accent2)">matrix iris: —</div>
-      <div id="dbg6" style="color:var(--accent3)">card vs matrix diff: —</div>
+      <div id="dbg4" style="color:var(--accent2)">lm-scale: —</div>
+      <div id="dbg5" style="color:var(--accent2)">lm iris: —</div>
+      <div id="dbg6" style="color:var(--accent3)">card vs landmark diff: —</div>
     </div>
     <div class="btnrow" id="recalibRow" style="display:none">
       <button class="btn btn-ghost" id="recalibLBtn" style="font-size:10px">↺ REDO CAL-L</button>
@@ -252,8 +252,10 @@ canvas#tapCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:4;touc
 </div>
 <div id="toast"></div>
 
-<!-- Tasks-vision API: gives facial_transformation_matrixes for metric scale -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.5/dist/face-landmarks-detection.min.js" crossorigin="anonymous"></script>
 <script>
 // $ must be first — used by inline onclick handlers in HTML
 const $ = id => document.getElementById(id);
@@ -452,81 +454,74 @@ async function startCamera(){
   });
 }
 async function loadModel(){
-  // vision_bundle.js exposes FaceLandmarker and FilesetResolver as globals
-  const FL = window.FaceLandmarker || (window.mediapipeTasksVision||{}).FaceLandmarker;
-  const FR = window.FilesetResolver || (window.mediapipeTasksVision||{}).FilesetResolver;
-  if(!FL || !FR) throw new Error('tasks-vision bundle not loaded — CDN blocked?');
-  const FaceLandmarker = FL, FilesetResolver = FR;
-
-  // Show progress in button text so user knows it's working
-  $('startBtn').textContent = 'Loading WASM…';
-  console.log('[IrisCalib] Loading WASM fileset…');
-  const filesetResolver = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
+  S.detector = await faceLandmarksDetection.createDetector(
+    faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+    { runtime:'mediapipe',
+      solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619',
+      refineLandmarks:true, maxFaces:1 }
   );
-  $('startBtn').textContent = 'Loading model…';
-  console.log('[IrisCalib] WASM ready, loading face_landmarker model…');
+}
 
-  // Try model URLs in order — Google Storage is the canonical source,
-  // older tasks bucket is fallback
-  const MODEL_URLS = [
-    'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task',
-    'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-    'https://storage.googleapis.com/mediapipe-tasks/face_landmarker/face_landmarker.task',
-  ];
+// ── landmark geometry scale estimator ────────────────────────────────────────
+// Each entry: [idxA, idxB, meanMm, sigmaMm]
+// Lower sigma = tighter population distribution = higher weight
+// Sources: anthropometric literature, averaged across sex/ethnicity
+const SCALE_ANCHORS = [
+  // Outer canthus to outer canthus (most reliable bone-to-bone)
+  [356, 127, 90.0, 4.5],
+  // Inner canthus to inner canthus
+  [362, 133, 33.0, 2.5],  // actually use medial canthus landmarks
+  // Left eye fissure width (inner to outer canthus, left eye)
+  [362, 263, 30.0, 2.0],
+  // Right eye fissure width
+  [133, 33,  30.0, 2.0],
+  // Nose wing to nose wing (alare width) — more ethnic variance, lower weight
+  [129, 358, 35.0, 3.5],
+  // Bitragion width (ear to ear via forehead) — large, stable
+  // Not great landmarks in face mesh, skip
+];
 
-  const makeOptions = (url, delegate) => ({
-    baseOptions: { modelAssetPath: url, delegate },
-    runningMode: 'VIDEO',
-    numFaces: 1,
-    outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: true
-  });
+function landmarkDistPx(kps, a, b){
+  return Math.hypot(kps[a].x - kps[b].x, kps[a].y - kps[b].y);
+}
 
-  let lastErr;
-  for(const url of MODEL_URLS){
-    for(const delegate of ['GPU','CPU']){
-      try{
-        $('startBtn').textContent = `Trying ${delegate}…`;
-        console.log(`[IrisCalib] Trying ${delegate} + ${url.split('/').pop()}`);
-        S.detector = await FaceLandmarker.createFromOptions(filesetResolver, makeOptions(url, delegate));
-        console.log('[IrisCalib] Model loaded OK:', delegate, url);
-        return; // success
-      } catch(e){
-        console.warn(`[IrisCalib] Failed ${delegate}/${url.split('/').pop()}:`, e.message||e);
-        lastErr = e;
-      }
-    }
+// Returns mm/px estimate from weighted combination of anchors
+// Returns null if face not frontal enough (yaw too large)
+function landmarkScaleEstimate(kps){
+  // Rough yaw check: compare left vs right eye x positions
+  // If strongly asymmetric, foreshortening makes anchors unreliable
+  const lEyeX = kps[468].x;  // left iris center
+  const rEyeX = kps[473].x;  // right iris center
+  const midX  = (lEyeX + rEyeX) / 2;
+  const frameW = Math.max(...kps.slice(0,10).map(p=>p.x)) * 1.1; // approx
+  // Simple symmetry check: mid should be near center of face bbox
+  // Use outer canthus x distance asymmetry instead
+  const lOuter = kps[356].x, rOuter = kps[127].x;
+  const lInner = kps[362].x, rInner = kps[133].x;  // rough
+  // If one side is more than 2x the other, skip
+  const lHalf = Math.abs(midX - lOuter);
+  const rHalf = Math.abs(midX - rOuter);
+  const asymm = Math.max(lHalf,rHalf) / (Math.min(lHalf,rHalf) + 1);
+  if(asymm > 1.8) return null;  // too much yaw
+
+  let num = 0, den = 0;
+  const details = [];
+  for(const [a, b, meanMm, sigmaMm] of SCALE_ANCHORS){
+    const distPx = landmarkDistPx(kps, a, b);
+    if(distPx < 5) continue;  // landmark probably collapsed
+    const w = 1 / (sigmaMm * sigmaMm);
+    // mm/px for this anchor
+    const mmPerPx = meanMm / distPx;
+    num += mmPerPx * w;
+    den += w;
+    details.push({a, b, distPx: distPx.toFixed(1), mmPerPx: mmPerPx.toFixed(5), w: w.toFixed(4)});
   }
-  throw lastErr; // all attempts failed
-}
-
-// ── matrix scale extraction ───────────────────────────────────────────────────
-// facial_transformation_matrixes[0] is a 4×4 column-major Float32Array
-// that maps the canonical face model (units: cm) into image space.
-// The scale factor (px/cm) is the magnitude of the first basis vector (cols 0–2).
-function matrixScale(mat){
-  // mat is Float32Array length 16, column-major
-  // col 0 = mat[0], mat[1], mat[2], mat[3]
-  const sx = Math.sqrt(mat[0]*mat[0] + mat[1]*mat[1] + mat[2]*mat[2]);
-  const sy = Math.sqrt(mat[4]*mat[4] + mat[5]*mat[5] + mat[6]*mat[6]);
-  const sz = Math.sqrt(mat[8]*mat[8] + mat[9]*mat[9] + mat[10]*mat[10]);
-  // Assert near-uniform (log if not)
-  if(Math.abs(sx-sy)/sx > 0.05) console.warn('[matrix] non-uniform scale', sx, sy, sz);
-  return sx; // px per cm
-}
-
-// Extract yaw angle (head rotation left/right) for foreshortening correction
-function matrixYaw(mat, scaleFactor){
-  // Normalise rotation matrix
-  const r00 = mat[0]/scaleFactor, r10 = mat[1]/scaleFactor, r20 = mat[2]/scaleFactor;
-  return Math.asin(Math.max(-1, Math.min(1, -r20)));
+  if(den === 0) return null;
+  return { mmPerPx: num/den, asymm, details };
 }
 
 // ── render loop ───────────────────────────────────────────────────────────────
-let lastVideoTime = -1;
-
-function loop(){
+async function loop(){
   if(!S.running){ requestAnimationFrame(loop); return; }
   if(video.readyState<2){ requestAnimationFrame(loop); return; }
 
@@ -535,51 +530,37 @@ function loop(){
 
   if(S.detector){
     try{
-      // Tasks-vision uses detectForVideo with timestamp
-      const nowMs = performance.now();
-      // Only process new frames
-      if(video.currentTime === lastVideoTime){ requestAnimationFrame(loop); return; }
-      lastVideoTime = video.currentTime;
+      const faces = await S.detector.estimateFaces(video,{flipHorizontal:false});
+      if(faces.length){
+        let kps = faces[0].keypoints;
+        const vw=video.videoWidth||1280, vh=video.videoHeight||720;
 
-      const result = S.detector.detectForVideo(video, nowMs);
-      const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-
-      if(result.faceLandmarks && result.faceLandmarks.length > 0){
-        // Landmarks are normalized 0-1 — scale to video pixels
-        const rawKps = result.faceLandmarks[0];
-        const kps = rawKps.map(p=>({x:p.x*vw, y:p.y*vh}));
+        // Normalize 0-1 coords to video pixels if needed
+        const maxX = Math.max(...kps.slice(0,10).map(p=>p.x));
+        if(maxX < 2) kps = kps.map(p=>({x:p.x*vw, y:p.y*vh}));
 
         if(kps.length >= 478){
           const sc = canvasScale();
           const lRadVid = irisRadius(kps, 468, 469);
           const rRadVid = irisRadius(kps, 473, 474);
-          const lRad = lRadVid * sc;  // CSS px — drawing only
+          const lRad = lRadVid * sc;
           const rRad = rRadVid * sc;
 
-          // ── Method A: card-calibrated scale ──────────────────────────────
+          // ── Method A: card-calibrated ─────────────────────────────────────
           const lMmCard = S.mmPerPxL ? lRadVid*2*S.mmPerPxL : null;
           const rMmCard = S.mmPerPxR ? rRadVid*2*S.mmPerPxR : null;
 
-          // ── Method B: matrix-derived metric scale ─────────────────────────
-          let lMmMat = null, rMmMat = null, pxPerMm = null, yawDeg = null;
-          if(result.facialTransformationMatrixes && result.facialTransformationMatrixes.length > 0){
-            const mat = result.facialTransformationMatrixes[0].data; // Float32Array
-            const pxPerCm = matrixScale(mat);
-            pxPerMm = pxPerCm / 10.0;
-            const yaw = matrixYaw(mat, pxPerCm);
-            yawDeg = yaw * 180 / Math.PI;
-            const cosYaw = Math.cos(yaw);
-            // Apply foreshortening correction: near-side iris gets compressed
-            // Left iris is on user's left → screen right (mirrored). Positive yaw = face turned right.
-            // The eye on the far side gets foreshortened, near side looks larger.
-            // Correction: divide by cos(yaw) — simple horizontal foreshortening
-            lMmMat = (lRadVid / cosYaw) * 2 / pxPerMm;
-            rMmMat = (rRadVid / cosYaw) * 2 / pxPerMm;
+          // ── Method B: landmark geometry estimate ──────────────────────────
+          const lmScale = landmarkScaleEstimate(kps);
+          let lMmLm = null, rMmLm = null;
+          if(lmScale){
+            lMmLm = lRadVid * 2 * lmScale.mmPerPx;
+            rMmLm = rRadVid * 2 * lmScale.mmPerPx;
           }
 
-          // Best available mm for each side (card preferred when locked, else matrix)
-          const lMm = lMmCard ?? lMmMat;
-          const rMm = rMmCard ?? rMmMat;
+          // Best available for display (card preferred, landmark fallback)
+          const lMm = lMmCard ?? lMmLm;
+          const rMm = rMmCard ?? rMmLm;
 
           if(lMm) S.liveIrisL = lMm;
           if(rMm) S.liveIrisR = rMm;
@@ -588,18 +569,24 @@ function loop(){
           $('debugPanel').style.display='';
           $('dbg1').textContent=`video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  sc:${sc.toFixed(4)}`;
           $('dbg2').textContent=`lRadVid:${lRadVid.toFixed(2)}  rRadVid:${rRadVid.toFixed(2)}`;
-          $('dbg3').textContent=`card scaleL:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  scaleR:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'}`;
-          $('dbg4').textContent=`matrix: ${pxPerMm?pxPerMm.toFixed(4)+'px/mm':'—'}  yaw:${yawDeg!==null?yawDeg.toFixed(1)+'°':'—'}`;
-          $('dbg5').textContent=`mat L:${lMmMat?lMmMat.toFixed(2):'—'}mm  mat R:${rMmMat?rMmMat.toFixed(2):'—'}mm`;
-          if(lMmCard && lMmMat){
-            const dL = (lMmCard-lMmMat).toFixed(2), dR = rMmCard&&rMmMat?(rMmCard-rMmMat).toFixed(2):'—';
-            $('dbg6').textContent=`card−matrix  L:${dL}mm  R:${dR}mm`;
-          } else { $('dbg6').textContent='card−matrix: need both methods active'; }
+          $('dbg3').textContent=`card  L:${S.mmPerPxL?S.mmPerPxL.toFixed(5):'—'}  R:${S.mmPerPxR?S.mmPerPxR.toFixed(5):'—'} mm/px`;
+          if(lmScale){
+            $('dbg4').textContent=`lm-scale: ${lmScale.mmPerPx.toFixed(5)} mm/px  asymm:${lmScale.asymm.toFixed(2)}`;
+            $('dbg5').textContent=`lm L:${lMmLm?lMmLm.toFixed(2):'—'}mm  R:${rMmLm?rMmLm.toFixed(2):'—'}mm`;
+          } else {
+            $('dbg4').textContent='lm-scale: — (face not frontal)';
+            $('dbg5').textContent='lm L:—  R:—';
+          }
+          if(lMmCard && lMmLm){
+            $('dbg6').textContent=`card−lm  L:${(lMmCard-lMmLm).toFixed(2)}mm  R:${rMmCard&&rMmLm?(rMmCard-rMmLm).toFixed(2):'—'}mm`;
+          } else {
+            $('dbg6').textContent='card−lm: need both active';
+          }
 
           // ── Draw iris circles ─────────────────────────────────────────────
-          [[468,'#7b8fff',lRad,lMm,lMmCard,lMmMat,'L'],
-           [473,'#ff6b9d',rRad,rMm,rMmCard,rMmMat,'R']]
-          .forEach(([ci,col,rad,mm,mmCard,mmMat,side])=>{
+          [[468,'#7b8fff',lRad,lMm,lMmCard,lMmLm,'L'],
+           [473,'#ff6b9d',rRad,rMm,rMmCard,rMmLm,'R']]
+          .forEach(([ci,col,rad,mm,mmCard,mmLm,side])=>{
             if(!mm) return;
             const {cx,cy} = videoPxToCanvasPx(kps[ci].x, kps[ci].y);
             const isActive = S.recording===side;
@@ -609,30 +596,28 @@ function loop(){
             octx.stroke(); octx.globalAlpha=1;
             octx.beginPath(); octx.arc(cx,cy,3,0,Math.PI*2);
             octx.fillStyle=col; octx.fill();
-            // Label: show both values if available
             octx.fillStyle=col;
             octx.font='bold 11px Space Mono,monospace';
             octx.textAlign='center'; octx.textBaseline='bottom';
             const cardTxt = mmCard ? `C:${mmCard.toFixed(1)}` : '';
-            const matTxt  = mmMat  ? `M:${mmMat.toFixed(1)}`  : '';
-            const label = [cardTxt, matTxt].filter(Boolean).join(' ');
+            const lmTxt   = mmLm   ? `L:${mmLm.toFixed(1)}`   : '';
+            const label   = [cardTxt, lmTxt].filter(Boolean).join(' ');
             octx.fillText(`${side} ${label}mm`, cx, cy-rad-4);
           });
 
-          // ── Live display in result cards ──────────────────────────────────
+          // ── Live display ──────────────────────────────────────────────────
           if(lMm && !S.statsL){
             $('valL').textContent=lMm.toFixed(2); $('valL').className='rval';
-            $('unitL').textContent=(lMmCard?'card':'matrix')+' live';
+            $('unitL').textContent=(lMmCard?'card':'landmark')+' live';
           }
           if(rMm && !S.statsR){
             $('valR').textContent=rMm.toFixed(2); $('valR').className='rval';
-            $('unitR').textContent=(rMmCard?'card':'matrix')+' live';
+            $('unitR').textContent=(rMmCard?'card':'landmark')+' live';
           }
-          // Always update matrix live readout
-          if(lMmMat) $('matL').innerHTML=`matrix: <span>${lMmMat.toFixed(2)}mm</span>`;
-          if(rMmMat) $('matR').innerHTML=`matrix: <span>${rMmMat.toFixed(2)}mm</span>`;
+          if(lMmLm) $('matL').innerHTML=`landmark: <span>${lMmLm.toFixed(2)}mm</span>`;
+          if(rMmLm) $('matR').innerHTML=`landmark: <span>${rMmLm.toFixed(2)}mm</span>`;
 
-          // ── Recording: collect both methods ───────────────────────────────
+          // ── Recording ─────────────────────────────────────────────────────
           const inMeasure = (phase==='recL'||phase==='recR');
           if(inMeasure && S.recording && S.recStart){
             const now = Date.now();
@@ -640,18 +625,18 @@ function loop(){
             const pct = Math.min(1, elapsed / (REC_SECS*1000));
             updateRecBar(S.recording, pct);
             if(S.recording==='L'){
-              if(lMmCard){ S.samplesL.push(lMmCard); S.allRaw.push({t:now,side:'L',method:'card',mm:lMmCard,scale:S.mmPerPxL}); }
-              if(lMmMat) { S.matSamplesL.push(lMmMat); S.allRaw.push({t:now,side:'L',method:'matrix',mm:lMmMat,scale:pxPerMm}); }
+              if(lMmCard){ S.samplesL.push(lMmCard);   S.allRaw.push({t:now,side:'L',method:'card',    mm:lMmCard,scale:S.mmPerPxL}); }
+              if(lMmLm)  { S.matSamplesL.push(lMmLm);  S.allRaw.push({t:now,side:'L',method:'landmark',mm:lMmLm,  scale:lmScale.mmPerPx}); }
             } else if(S.recording==='R'){
-              if(rMmCard){ S.samplesR.push(rMmCard); S.allRaw.push({t:now,side:'R',method:'card',mm:rMmCard,scale:S.mmPerPxR}); }
-              if(rMmMat) { S.matSamplesR.push(rMmMat); S.allRaw.push({t:now,side:'R',method:'matrix',mm:rMmMat,scale:pxPerMm}); }
+              if(rMmCard){ S.samplesR.push(rMmCard);   S.allRaw.push({t:now,side:'R',method:'card',    mm:rMmCard,scale:S.mmPerPxR}); }
+              if(rMmLm)  { S.matSamplesR.push(rMmLm);  S.allRaw.push({t:now,side:'R',method:'landmark',mm:rMmLm,  scale:lmScale.mmPerPx}); }
             }
-            const sArr = S.recording==='L' ? S.samplesL : S.samplesR;
+            const sArr = S.recording==='L' ? S.samplesL    : S.samplesR;
             const mArr = S.recording==='L' ? S.matSamplesL : S.matSamplesR;
             if(sArr.length>0||mArr.length>0){
               const cMean = sArr.length ? (sArr.reduce((a,b)=>a+b,0)/sArr.length).toFixed(2) : '—';
               const mMean = mArr.length ? (mArr.reduce((a,b)=>a+b,0)/mArr.length).toFixed(2) : '—';
-              $('dbg3').textContent=`card n=${sArr.length} mean=${cMean}  mat n=${mArr.length} mean=${mMean}`;
+              $('dbg3').textContent=`card n=${sArr.length} mean=${cMean}  lm n=${mArr.length} mean=${mMean}`;
             }
             if(elapsed >= REC_SECS*1000){
               const doneSide = S.recording;
@@ -728,11 +713,11 @@ $('startBtn').onclick = async () => {
     toast('Camera denied — check permissions');
     $('startBtn').disabled=false; $('startBtn').textContent='▶ START CAMERA'; return;
   }
-  setStatus('LOADING…','warn'); $('startBtn').textContent='Loading…';
+  setStatus('LOADING…','warn'); $('startBtn').textContent='Loading model…';
   try{ await loadModel(); }
   catch(e){
     console.error('[IrisCalib] loadModel failed:', e);
-    toast('Model failed: ' + (e.message||e));
+    toast('Model error: '+(e.message||e));
     setStatus('ERROR','warn');
     $('startBtn').disabled=false; $('startBtn').textContent='▶ RETRY';
     return;
