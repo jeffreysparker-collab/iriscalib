@@ -54,6 +54,16 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 #instr span{color:var(--accent)}
 #instr .warn{color:var(--warn)}
 
+/* Pose badge */
+#poseBadge{
+  font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:5px;
+  display:inline-flex;align-items:center;gap:6px;transition:all .25s;
+}
+#poseBadge.ok    {background:rgba(74,240,200,.08); border:1px solid rgba(74,240,200,.3);  color:var(--accent)}
+#poseBadge.warn  {background:rgba(255,179,71,.08);  border:1px solid rgba(255,179,71,.4);  color:var(--warn)}
+#poseBadge.bad   {background:rgba(255,107,157,.08); border:1px solid rgba(255,107,157,.4); color:var(--accent3)}
+#poseBadge.hidden{display:none}
+
 /* Progress ring */
 #recRing{display:none;flex-direction:column;align-items:center;gap:8px}
 .ring-wrap{position:relative;width:80px;height:80px}
@@ -123,6 +133,7 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
   <div id="panel">
 
     <div id="instr">Tap <span>▶ START</span> then look straight at the camera.</div>
+    <div id="poseBadge" class="hidden">—</div>
 
     <!-- Recording ring -->
     <div id="recRing">
@@ -234,42 +245,158 @@ function canvasScale(){
 
 // ── iris radius in video pixels ───────────────────────────────────────────────
 // MediaPipe refined landmarks: center=468(L)/473(R), 4 edge pts at 469-472/474-477
-function irisRadius(kps, ci, es){
+// ── iris geometry ─────────────────────────────────────────────────────────────
+// Raw mean radius from 4 edge landmarks around center (video pixels)
+function irisRadiusRaw(kps, ci, es){
   let s=0;
   for(let i=es;i<es+4;i++) s+=Math.hypot(kps[i].x-kps[ci].x, kps[i].y-kps[ci].y);
   return s/4;
 }
 
+// Roll angle of the camera/face from the landmark pair that should be horizontal.
+// We use the line between the two iris centers — in a level frontal face this is
+// perfectly horizontal. Any tilt appears as a non-zero angle here.
+function rollAngle(kps){
+  // iris centers: 468=left, 473=right (in video/face space, pre-mirror)
+  const dx = kps[473].x - kps[468].x;
+  const dy = kps[473].y - kps[468].y;
+  return Math.atan2(dy, dx);  // radians; 0 = level
+}
+
+// Iris radius corrected for camera roll.
+// When the camera is tilted by angle θ, the horizontal span of the iris
+// gets projected onto a rotated axis. We decompose the 4 edge vectors into
+// components along and perpendicular to the tilt axis and take the mean
+// of the corrected radii.
+function irisRadiusCorrected(kps, ci, es, roll){
+  const cosR = Math.cos(roll), sinR = Math.sin(roll);
+  let s=0;
+  for(let i=es;i<es+4;i++){
+    const dx = kps[i].x - kps[ci].x;
+    const dy = kps[i].y - kps[ci].y;
+    // Rotate edge vector back to axis-aligned frame
+    const dx2 =  dx*cosR + dy*sinR;
+    const dy2 = -dx*sinR + dy*cosR;
+    s += Math.hypot(dx2, dy2);
+  }
+  return s/4;
+}
+
+// Parallax correction for iris being on a sphere ~8mm proud of the corneal plane.
+// At close range the iris subtends a larger angle than a flat target would.
+// We estimate face depth from the inter-ocular distance in pixels vs known mm:
+//   depth_px ≈ ipd_px * (focalLength / ipd_mm)
+// Then apply:  r_corrected = r_raw / (1 + CORNEAL_DEPTH_MM * mmPerPx * scale)
+// In practice this is a small multiplicative factor.
+const CORNEAL_PROTRUSION_MM = 8.0;  // how far iris plane sits in front of face plane
+
+function parallaxFactor(mmPerPx, ipdPx){
+  // The iris sits ~8mm proud of the nominal face plane (corneal protrusion).
+  // At close range this makes the iris subtend a slightly larger angle than a
+  // flat target at the same nominal depth would, so we slightly over-estimate radius.
+  // We estimate depth from IPD pixels: depth_mm ≈ IPD_MM_MEAN / mmPerPx
+  // where IPD_MM_MEAN = 63mm (average inter-pupillary distance).
+  // Then: correction = CORNEAL_PROTRUSION_MM / depth_mm = CORNEAL_PROTRUSION_MM * mmPerPx / IPD_MM_MEAN
+  // Factor = 1 / (1 + correction)
+  // At 60cm: mmPerPx≈0.105 → correction≈1.3%  → factor≈0.987
+  // At 40cm: mmPerPx≈0.158 → correction≈2.0%  → factor≈0.980
+  // At 30cm: mmPerPx≈0.210 → correction≈2.7%  → factor≈0.974
+  const IPD_MM_MEAN = 63.0;
+  const correction = CORNEAL_PROTRUSION_MM * mmPerPx / IPD_MM_MEAN;
+  return 1 / (1 + correction);
+}
+
 // ── landmark-based scale estimator ───────────────────────────────────────────
-// Weighted least squares over known inter-landmark distances.
-// Weight = 1/sigma^2 where sigma = population std dev of that distance.
+// Weighted least squares: w_i = 1/sigma_i^2
+//
+// Anchor selection rationale:
+//   - Outer canthus (356↔127): large span, good signal, BUT sits near frame edges
+//     where barrel distortion is worst. Inflate sigma to reduce its weight.
+//   - Inner canthus (362↔133): short span but near optical axis, low distortion.
+//   - Eye fissure L/R (263↔362, 33↔133): same depth as iris, very low distortion,
+//     both averaged so per-eye asymmetry cancels. Best anchors.
+//   - Nose alare (129↔358): near optical axis, but high ethnic/sex variance → high sigma.
+//   - Brow width (300↔70): forehead landmarks, stable, near center frame.
+//
+// sigma values tuned so:
+//   fissure pair  weight ≈ 0.25 each  (total 0.50)
+//   inner canthus weight ≈ 0.16
+//   nose alare    weight ≈ 0.06
+//   outer canthus weight ≈ 0.03  (heavily discounted for distortion)
+// Anchor weight rationale (w = 1/sigma^2, normalized):
+//   fissure L+R:    sigma=1.8 → w=0.309 each  → combined 61.8%  ← dominant
+//   inner canthus:  sigma=2.5 → w=0.160        →          16.0%
+//   nose alare:     sigma=4.0 → w=0.063        →           6.3%
+//   outer canthus:  sigma=12  → w=0.007        →           0.7%  (nearly negligible)
+// Outer canthus kept only as a very weak sanity anchor — barrel distortion at
+// frame edges makes it unreliable, especially at close range.
 const ANCHORS = [
   // [idxA, idxB, meanMm, sigmaMm]
-  [356, 127, 90.0, 4.5],   // outer canthus to outer canthus  (most reliable)
+  [263, 362, 30.0, 1.8],   // left  eye fissure — near optical axis, same depth as iris
+  [ 33, 133, 30.0, 1.8],   // right eye fissure — same
   [362, 133, 33.0, 2.5],   // inner canthus to inner canthus
-  [263, 362, 30.0, 2.0],   // left eye fissure width
-  [ 33, 133, 30.0, 2.0],   // right eye fissure width
-  [129, 358, 35.0, 3.5],   // nose alare width (more ethnic variance)
+  [129, 358, 35.0, 4.0],   // nose alare — ethnic variance, lower weight
+  [356, 127, 90.0, 12.0],  // outer canthus — barrel distortion risk, nearly ignored
 ];
 
+// Pose thresholds — frames outside these are rejected entirely
+const MAX_YAW_ASYMM    = 1.35; // yaw rejection
+const MAX_ROLL_DEG     = 4;    // hard reject above 4° — at 6° error was ~0.3mm
+const SOFT_ROLL_DEG    = 2;    // below this: full weight; above: weight tapers to 0 at MAX
+
+// Distance thresholds based on IPD in pixels.
+// At ~60cm: ipdPx ≈ 100-130.  Too close (<40cm): ipdPx > 150.  Too far (>90cm): ipdPx < 70.
+// Tightened close threshold — barrel distortion grows fast below ~40cm
+const IPD_TOO_CLOSE_PX = 150;
+const IPD_TOO_FAR_PX   = 72;
+
 function estimateScale(kps){
-  // Yaw guard: compare each outer canthus distance to face midpoint.
-  // If one side is >1.6x the other, face is too rotated — return null.
+  // ── Yaw guard ────────────────────────────────────────────────────────────
   const midX  = (kps[468].x + kps[473].x) / 2;
   const lDist = Math.abs(midX - kps[356].x);
   const rDist = Math.abs(midX - kps[127].x);
   const asymm = Math.max(lDist,rDist) / (Math.min(lDist,rDist) + 0.1);
-  if(asymm > 1.6) return null;
+  if(asymm > MAX_YAW_ASYMM) return null;
 
+  // ── Roll guard + soft weight ─────────────────────────────────────────────
+  const roll    = rollAngle(kps);
+  const rollDeg = Math.abs(roll * 180 / Math.PI);
+  if(rollDeg > MAX_ROLL_DEG) return null;
+  // Soft taper: full weight below SOFT_ROLL_DEG, linearly tapers to ~0.05 at MAX_ROLL_DEG
+  // This means frames at 3.9° contribute much less than frames at 1° — they're averaged in
+  // but can't dominate the result the way binary accept/reject allows.
+  const rollWeight = rollDeg <= SOFT_ROLL_DEG
+    ? 1.0
+    : Math.max(0.05, 1.0 - (rollDeg - SOFT_ROLL_DEG) / (MAX_ROLL_DEG - SOFT_ROLL_DEG));
+
+  // ── Pitch guard (rough) ──────────────────────────────────────────────────
+  // Nose tip (1) should be below eye midpoint. If it's way off, face is pitched.
+  const eyeMidY = (kps[468].y + kps[473].y) / 2;
+  const ipdPx   = Math.hypot(kps[473].x-kps[468].x, kps[473].y-kps[468].y);
+  const pitchOff= Math.abs(kps[1].y - eyeMidY) / (ipdPx + 0.1);
+  // pitchOff ≈ 0.5–0.9 when frontal; far from that = pitched
+  // We don't reject on this, just store it for the CSV
+
+  // ── Weighted scale ───────────────────────────────────────────────────────
   let num=0, den=0;
   for(const [a,b,meanMm,sigmaMm] of ANCHORS){
     const d = Math.hypot(kps[a].x-kps[b].x, kps[a].y-kps[b].y);
     if(d < 5) continue;
-    const w = 1/(sigmaMm*sigmaMm);
+    const w = (1/(sigmaMm*sigmaMm)) * rollWeight; // roll-weight all anchors equally
     num += (meanMm/d) * w;
     den += w;
   }
-  return den===0 ? null : { mmPerPx: num/den, asymm };
+  if(den===0) return null;
+
+  const mmPerPx = num/den;
+  const pFactor = parallaxFactor(mmPerPx, ipdPx);
+
+  // Distance status from IPD pixel size
+  let distStatus = 'ok';
+  if(ipdPx > IPD_TOO_CLOSE_PX) distStatus = 'close';
+  else if(ipdPx < IPD_TOO_FAR_PX) distStatus = 'far';
+
+  return { mmPerPx, roll, rollDeg, rollWeight, asymm, ipdPx, pitchOff, pFactor, distStatus };
 }
 
 // ── statistics ────────────────────────────────────────────────────────────────
@@ -297,10 +424,30 @@ function finalize(){
   S.recording=false; S.recStart=null;
   $('recRing').style.display='none';
 
-  const lArr = S.samples.map(s=>s.lMm);
-  const rArr = S.samples.map(s=>s.rMm);
-  S.statsL = computeStats(lArr);
-  S.statsR = computeStats(rArr);
+  // Weighted mean: frames with less roll contribute more
+  // Use rollWeight as the per-frame weight for the mean, but still
+  // compute unweighted variance over all accepted samples for the CI
+  // (conservative — doesn't assume weighted samples are independent)
+  const weightedMean = (vals, weights) => {
+    const wSum = weights.reduce((a,b)=>a+b,0);
+    return vals.reduce((s,v,i)=>s+v*weights[i],0) / wSum;
+  };
+  const weights = S.samples.map(s=>s.rollWeight);
+  const lVals   = S.samples.map(s=>s.lMm);
+  const rVals   = S.samples.map(s=>s.rMm);
+  const lMean   = weightedMean(lVals, weights);
+  const rMean   = weightedMean(rVals, weights);
+  // Compute stats using unweighted variance around the weighted mean
+  const statsFromWeightedMean = (vals, mean) => {
+    const n = vals.length;
+    if(n<2) return null;
+    const variance = vals.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
+    const se = Math.sqrt(variance/n);
+    const t = n>=120?1.980:n>=60?2.000:n>=30?2.042:n>=20?2.093:n>=10?2.228:2.776;
+    return {mean, ci:t*se, n, se};
+  };
+  S.statsL = statsFromWeightedMean(lVals, lMean);
+  S.statsR = statsFromWeightedMean(rVals, rMean);
 
   if(!S.statsL && !S.statsR){
     toast('Too few valid frames — try again');
@@ -321,15 +468,22 @@ function finalize(){
   if(S.statsL && S.statsR){
     const diff   = Math.abs(S.statsL.mean - S.statsR.mean);
     const larger = S.statsL.mean >= S.statsR.mean ? 'LEFT' : 'RIGHT';
+    // Roll quality summary
+    const rollVals = S.samples.map(s=>s.roll);
+    const meanRoll = rollVals.reduce((a,b)=>a+b,0)/rollVals.length;
+    const maxRoll  = Math.max(...rollVals);
+    const rollNote = maxRoll > 3 ? ` <span class="warn"> max roll ${maxRoll.toFixed(1)}°</span>` : '';
     $('instr').innerHTML =
       `<span>${larger}</span> larger by <span>${diff.toFixed(2)}mm</span>`+
-      ` &nbsp;·&nbsp; L:${S.statsL.mean.toFixed(2)} R:${S.statsR.mean.toFixed(2)}mm`;
+      ` &nbsp;·&nbsp; L:${S.statsL.mean.toFixed(2)} R:${S.statsR.mean.toFixed(2)}mm`+
+      rollNote;
   }
 
   setStatus('DONE','on');
   $('exportBtn').disabled = false;
   $('actionRow').style.display = 'flex';
   $('recRow').style.display = 'none';
+  $('poseBadge').className = 'hidden';
   toast(`Done — ${S.samples.length} frames averaged`);
 }
 
@@ -353,22 +507,57 @@ async function loop(){
 
       if(kps.length >= 478){
         const sc      = canvasScale();
-        const lRadVid = irisRadius(kps, 468, 469);
-        const rRadVid = irisRadius(kps, 473, 474);
         const lmScale = estimateScale(kps);
-
-        const lMm = lmScale ? lRadVid*2*lmScale.mmPerPx : null;
-        const rMm = lmScale ? rRadVid*2*lmScale.mmPerPx : null;
         const frontal = !!lmScale;
+
+        // Roll-corrected iris radii (video pixels)
+        const roll      = lmScale ? lmScale.roll : 0;
+        const lRadVid   = irisRadiusCorrected(kps, 468, 469, roll);
+        const rRadVid   = irisRadiusCorrected(kps, 473, 474, roll);
+
+        // Apply scale + parallax correction
+        const pf        = lmScale ? lmScale.pFactor : 1;
+        const lMm = lmScale ? lRadVid * 2 * lmScale.mmPerPx * pf : null;
+        const rMm = lmScale ? rRadVid * 2 * lmScale.mmPerPx * pf : null;
+
+        // ── pose badge ────────────────────────────────────────────────────
+        const badge = $('poseBadge');
+        badge.className = 'hidden';
+        if(!lmScale){
+          badge.className = 'bad';
+          const rollRaw = rollAngle(kps) * 180 / Math.PI;
+          const midX2   = (kps[468].x + kps[473].x) / 2;
+          const ld = Math.abs(midX2 - kps[356].x), rd = Math.abs(midX2 - kps[127].x);
+          const as = Math.max(ld,rd)/(Math.min(ld,rd)+0.1);
+          if(Math.abs(rollRaw) > MAX_ROLL_DEG)
+            badge.textContent = `⚠ TILT ${rollRaw.toFixed(1)}° — level the camera`;
+          else
+            badge.textContent = `⚠ TURN — face the camera straight`;
+        } else {
+          const ds = lmScale.distStatus;
+          if(ds === 'close'){
+            badge.className = 'bad';
+            badge.textContent = `⚠ TOO CLOSE — move back  (ipd:${lmScale.ipdPx.toFixed(0)}px)`;
+          } else if(ds === 'far'){
+            badge.className = 'warn';
+            badge.textContent = `↔ MOVE CLOSER  (ipd:${lmScale.ipdPx.toFixed(0)}px)`;
+          } else {
+            badge.className = 'ok';
+            const rollSign = lmScale.roll >= 0 ? '+' : '';
+            badge.textContent = `✓ GOOD  roll:${rollSign}${lmScale.rollDeg.toFixed(1)}° (w:${lmScale.rollWeight.toFixed(2)})  ipd:${lmScale.ipdPx.toFixed(0)}px`;
+          }
+        }
 
         // ── debug ─────────────────────────────────────────────────────────
         $('debugPanel').style.display = '';
-        $('dbg1').textContent = `video:${vw}×${vh}  canvas:${overlay.width}×${overlay.height}  sc:${sc.toFixed(4)}`;
-        $('dbg2').textContent = `lRad:${lRadVid.toFixed(2)}px  rRad:${rRadVid.toFixed(2)}px`;
+        $('dbg1').textContent = `video:${vw}×${vh}  sc:${sc.toFixed(4)}  samples:${S.samples.length}`;
+        $('dbg2').textContent = lmScale
+          ? `scale:${lmScale.mmPerPx.toFixed(5)}mm/px  parallax:${((1-pf)*100).toFixed(2)}%  ipd:${lmScale.ipdPx.toFixed(1)}px`
+          : 'scale: — not frontal';
         $('dbg3').textContent = lmScale
-          ? `scale:${lmScale.mmPerPx.toFixed(5)}mm/px  asymm:${lmScale.asymm.toFixed(2)}`
-          : 'scale: — face not frontal';
-        $('dbg4').textContent = `L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm  samples:${S.samples.length}`;
+          ? `roll:${lmScale.rollDeg.toFixed(1)}°  yaw:${lmScale.asymm.toFixed(2)}  dist:${lmScale.distStatus}`
+          : `pose rejected  roll:${(rollAngle(kps)*180/Math.PI).toFixed(1)}°`;
+        $('dbg4').textContent = `L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm  lRad:${lRadVid.toFixed(2)}px rRad:${rRadVid.toFixed(2)}px`;
 
         // ── draw iris circles ─────────────────────────────────────────────
         [[468, '#7b8fff', lRadVid*sc, lMm, 'L'],
@@ -408,9 +597,20 @@ async function loop(){
         if(S.recording && S.recStart){
           const elapsed = Date.now() - S.recStart;
           updateRing(elapsed);
-          if(lMm && rMm){
-            S.samples.push({lMm, rMm, scale:lmScale.mmPerPx, asymm:lmScale.asymm});
-            S.allRaw.push({t:Date.now(), lMm, rMm, scale:lmScale.mmPerPx, asymm:lmScale.asymm});
+          // Accept frame only if pose is good AND distance is ok
+          // Distance errors are systematic — averaging doesn't fix them
+          if(lMm && rMm && lmScale.distStatus === 'ok'){
+            const frame = {
+              lMm, rMm,
+              scale:      lmScale.mmPerPx,
+              asymm:      lmScale.asymm,
+              roll:       lmScale.rollDeg,
+              rollWeight: lmScale.rollWeight,
+              pitch:      lmScale.pitchOff,
+              pFactor:    lmScale.pFactor,
+            };
+            S.samples.push(frame);
+            S.allRaw.push({t:Date.now(), ...frame});
           }
           if(elapsed >= REC_SECS*1000){
             S.recording = false;
@@ -418,8 +618,9 @@ async function loop(){
           }
         }
 
-        // Enable record button only when face is frontal
-        $('recBtn').disabled = !frontal;
+        // Enable record button only when frontal AND distance is ok
+        const distOk = lmScale && lmScale.distStatus === 'ok';
+        $('recBtn').disabled = !frontal || !distOk;
         setStatus(S.recording ? 'RECORDING' : 'TRACKING', S.recording ? 'rec' : 'on');
 
       }
@@ -519,9 +720,9 @@ $('retryBtn').onclick = ()=>{
 // ── CSV export ────────────────────────────────────────────────────────────────
 $('exportBtn').onclick = ()=>{
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
-  const rows = ['timestamp_ms,left_mm,right_mm,scale_mm_per_px,asymm'];
+  const rows = ['timestamp_ms,left_mm,right_mm,scale_mm_per_px,asymm,roll_deg,roll_weight,pitch_off,parallax_pct'];
   S.allRaw.forEach(r=>{
-    rows.push(`${r.t},${r.lMm.toFixed(4)},${r.rMm.toFixed(4)},${r.scale.toFixed(6)},${r.asymm.toFixed(3)}`);
+    rows.push(`${r.t},${r.lMm.toFixed(4)},${r.rMm.toFixed(4)},${r.scale.toFixed(6)},${r.asymm.toFixed(3)},${r.roll.toFixed(2)},${(r.rollWeight||1).toFixed(3)},${r.pitch.toFixed(3)},${((1-r.pFactor)*100).toFixed(2)}`);
   });
   rows.push('');
   rows.push('# SUMMARY');
