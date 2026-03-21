@@ -455,21 +455,50 @@ async function loadModel(){
   // vision_bundle.js exposes FaceLandmarker and FilesetResolver as globals
   const FL = window.FaceLandmarker || (window.mediapipeTasksVision||{}).FaceLandmarker;
   const FR = window.FilesetResolver || (window.mediapipeTasksVision||{}).FilesetResolver;
-  if(!FL || !FR) throw new Error('mediapipe tasks-vision not loaded — check CDN');
+  if(!FL || !FR) throw new Error('tasks-vision bundle not loaded — CDN blocked?');
   const FaceLandmarker = FL, FilesetResolver = FR;
+
+  // Show progress in button text so user knows it's working
+  $('startBtn').textContent = 'Loading WASM…';
+  console.log('[IrisCalib] Loading WASM fileset…');
   const filesetResolver = await FilesetResolver.forVisionTasks(
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
   );
-  S.detector = await FaceLandmarker.createFromOptions(filesetResolver, {
-    baseOptions: {
-      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-      delegate: 'GPU'
-    },
+  $('startBtn').textContent = 'Loading model…';
+  console.log('[IrisCalib] WASM ready, loading face_landmarker model…');
+
+  // Try model URLs in order — Google Storage is the canonical source,
+  // older tasks bucket is fallback
+  const MODEL_URLS = [
+    'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task',
+    'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+    'https://storage.googleapis.com/mediapipe-tasks/face_landmarker/face_landmarker.task',
+  ];
+
+  const makeOptions = (url, delegate) => ({
+    baseOptions: { modelAssetPath: url, delegate },
     runningMode: 'VIDEO',
     numFaces: 1,
     outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: true  // ← metric scale
+    outputFacialTransformationMatrixes: true
   });
+
+  let lastErr;
+  for(const url of MODEL_URLS){
+    for(const delegate of ['GPU','CPU']){
+      try{
+        $('startBtn').textContent = `Trying ${delegate}…`;
+        console.log(`[IrisCalib] Trying ${delegate} + ${url.split('/').pop()}`);
+        S.detector = await FaceLandmarker.createFromOptions(filesetResolver, makeOptions(url, delegate));
+        console.log('[IrisCalib] Model loaded OK:', delegate, url);
+        return; // success
+      } catch(e){
+        console.warn(`[IrisCalib] Failed ${delegate}/${url.split('/').pop()}:`, e.message||e);
+        lastErr = e;
+      }
+    }
+  }
+  throw lastErr; // all attempts failed
 }
 
 // ── matrix scale extraction ───────────────────────────────────────────────────
@@ -701,7 +730,13 @@ $('startBtn').onclick = async () => {
   }
   setStatus('LOADING…','warn'); $('startBtn').textContent='Loading…';
   try{ await loadModel(); }
-  catch(e){ toast('Model error'); return; }
+  catch(e){
+    console.error('[IrisCalib] loadModel failed:', e);
+    toast('Model failed: ' + (e.message||e));
+    setStatus('ERROR','warn');
+    $('startBtn').disabled=false; $('startBtn').textContent='▶ RETRY';
+    return;
+  }
   S.running=true;
   $('startRow').style.display='none';
   $('s1').classList.add('active');
