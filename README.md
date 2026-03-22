@@ -1,6 +1,6 @@
 # IrisCalib
 
-Calibrated iris diameter measurement using a credit card as a physical ruler.
+Calibrated iris diameter measurement using a Aruco tags as a physical ruler.
 Built with MediaPipe FaceMesh + WebGL. Runs entirely in the browser — no server, no data sent anywhere.
 
 https://jeffreysparker-collab.github.io/iriscalib/
