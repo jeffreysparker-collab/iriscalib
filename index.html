@@ -218,13 +218,20 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
         <div class="rval pending" id="valL">—</div>
         <div class="runit" id="unitL">not measured</div>
         <div class="rci"  id="ciL"></div>
+        <div class="rci"  id="ciL2"></div>
       </div>
       <div class="rcard R">
         <div class="rlbl">RIGHT IRIS</div>
         <div class="rval pending" id="valR">—</div>
         <div class="runit" id="unitR">not measured</div>
         <div class="rci"  id="ciR"></div>
+        <div class="rci"  id="ciR2"></div>
       </div>
+    </div>
+    <!-- Summary row (shown after recording) -->
+    <div id="summaryRow" style="display:none;font-family:var(--mono);font-size:10px;color:var(--dim);
+      background:var(--surf2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;line-height:2">
+      <div id="summaryText"></div>
     </div>
 
     <!-- Buttons -->
@@ -586,7 +593,13 @@ function finalize(){
 
   if(S.samples.length<5){toast('Too few valid frames — try again');setStatus('READY','on');return;}
 
-  // Sort by quality, take best BEST_N
+  // ── Trial mean (all valid frames) ────────────────────────────────────────
+  const allWeights=S.samples.map(f=>f.rollWeight||1);
+  const allLVals=S.samples.map(f=>f.lMm), allRVals=S.samples.map(f=>f.rMm);
+  const allLMean=weightedMean(allLVals,allWeights), allRMean=weightedMean(allRVals,allWeights);
+  const statsAllL=computeStats(allLVals), statsAllR=computeStats(allRVals);
+
+  // ── Best-N mean ───────────────────────────────────────────────────────────
   const sorted=[...S.samples].sort((a,b)=>frameQuality(a)-frameQuality(b));
   const best=sorted.slice(0,Math.min(BEST_N,sorted.length));
 
@@ -605,22 +618,40 @@ function finalize(){
   S.statsR=statsFn(rVals,rMean);
 
   const arucoFrames=best.filter(f=>f.scaleSource==='aruco').length;
-  const scaleNote=arucoFrames>0?`<span>ArUco ${arucoFrames}/${best.length} frames</span>`:'<span class="warn">landmark scale only</span>';
+  const blendFrames=best.filter(f=>f.arucoScale!==null&&f.lmScale!==null).length;
+  const scaleNote=arucoFrames>0
+    ? `<span>ArUco ${arucoFrames}/${best.length}${blendFrames>0?` (${blendFrames} blended)`:''}</span>`
+    : `<span class="warn">landmark scale only</span>`;
 
   const fmt=st=>st?st.mean.toFixed(2):'—';
   const ci=st=>st?`95% CI ±${st.ci.toFixed(2)}mm  n=${st.n}`:'';
+
+  // Best-N result (primary display)
   $('valL').textContent=fmt(S.statsL); $('valL').className=S.statsL?'rval':'rval pending';
   $('valR').textContent=fmt(S.statsR); $('valR').className=S.statsR?'rval':'rval pending';
-  $('unitL').textContent=S.statsL?'mm  ✓ best-'+best.length:'not measured';
-  $('unitR').textContent=S.statsR?'mm  ✓ best-'+best.length:'not measured';
+  $('unitL').textContent=S.statsL?`mm  ✓ best-${best.length}`:'not measured';
+  $('unitR').textContent=S.statsR?`mm  ✓ best-${best.length}`:'not measured';
   $('ciL').innerHTML=S.statsL?`<span>${ci(S.statsL)}</span>`:'';
   $('ciR').innerHTML=S.statsR?`<span>${ci(S.statsR)}</span>`:'';
 
+  // Trial mean (secondary display)
+  $('ciL2').innerHTML=statsAllL?`<span style="color:var(--dim)">trial mean ${allLMean.toFixed(2)}mm  n=${S.samples.length}</span>`:'';
+  $('ciR2').innerHTML=statsAllR?`<span style="color:var(--dim)">trial mean ${allRMean.toFixed(2)}mm  n=${S.samples.length}</span>`:'';
+
+  // Summary row
   if(S.statsL&&S.statsR){
     const diff=Math.abs(S.statsL.mean-S.statsR.mean);
     const larger=S.statsL.mean>=S.statsR.mean?'LEFT':'RIGHT';
+    const allDiff=Math.abs(allLMean-allRMean);
     $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff.toFixed(2)}mm</span>`+
       ` · L:${S.statsL.mean.toFixed(2)} R:${S.statsR.mean.toFixed(2)}mm &nbsp;${scaleNote}`;
+    $('summaryRow').style.display='';
+    $('summaryText').innerHTML=
+      `<span style="color:var(--accent)">BEST-${best.length}</span>` +
+      `  L:${S.statsL.mean.toFixed(3)}mm  R:${S.statsR.mean.toFixed(3)}mm  Δ:${diff.toFixed(3)}mm<br>` +
+      `<span style="color:var(--dim)">TRIAL ALL (${S.samples.length})</span>` +
+      `  L:${allLMean.toFixed(3)}mm  R:${allRMean.toFixed(3)}mm  Δ:${allDiff.toFixed(3)}mm<br>` +
+      `scale: ${scaleNote}`;
   }
 
   setStatus('DONE','on');
@@ -682,33 +713,40 @@ async function loop(){
         const lmScale=estimateLandmarkScale(kps);
         let activeScale, rollForIris, rollDeg, rollWeight, asymm, distStatus, ipdPx, scaleSource;
 
-        if(aruco){
-          const ipdPxRaw = lmScale ? lmScale.ipdPx : null;
+        if(aruco && lmScale){
+          // Both sources available — average them. ArUco reads low (marker is
+          // in front of the iris plane), landmark reads high (anchor geometry
+          // assumptions). Blending cancels the opposing biases.
+          const ipdPxRaw = lmScale.ipdPx;
           let depthCorr = 1.0;
-          if(ipdPxRaw && ipdPxRaw > 20){
+          if(ipdPxRaw > 20){
             const dEye_mm = IPD_MM_MEAN / (ipdPxRaw * aruco.mmPerPx);
             if(dEye_mm > FOREHEAD_DEPTH_MM + 50)
               depthCorr = (dEye_mm - FOREHEAD_DEPTH_MM) / dEye_mm;
           }
-          activeScale  = aruco.mmPerPx * depthCorr;
-          // Always use landmark roll when available — it's consistent and stable.
-          // ArUco marker edge roll measures marker orientation, not head tilt.
-          if(lmScale){
-            rollForIris  = lmScale.roll;
-            rollDeg      = lmScale.rollDeg;
-            rollWeight   = lmScale.rollWeight;
-          } else {
-            rollForIris  = aruco.rollRad;
-            rollDeg      = Math.abs(aruco.rollDeg);
-            const arucoMaxRoll = adaptiveRollMax(ipdPxRaw||100);
-            rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(arucoMaxRoll-SOFT_ROLL_DEG));
-          }
-          asymm        = lmScale ? lmScale.asymm : 1.0;
+          const arucoScale = aruco.mmPerPx * depthCorr;
+          activeScale  = (arucoScale + lmScale.mmPerPx) / 2;
+          rollForIris  = lmScale.roll;
+          rollDeg      = lmScale.rollDeg;
+          rollWeight   = lmScale.rollWeight;
+          asymm        = lmScale.asymm;
           distStatus   = 'ok';
-          ipdPx        = ipdPxRaw || 100;
+          ipdPx        = ipdPxRaw;
           scaleSource  = 'aruco';
           $('scaleBadge').className='aruco';
-          $('scaleBadge').textContent=`▲ ${activeScale.toFixed(4)}mm/px (corr ${depthCorr.toFixed(3)}×)`;
+          $('scaleBadge').textContent=`▲ ${activeScale.toFixed(4)}mm/px (ar:${arucoScale.toFixed(4)} lm:${lmScale.mmPerPx.toFixed(4)})`;
+        } else if(aruco){
+        } else if(aruco){
+          // ArUco only — no landmark scale available
+          activeScale  = aruco.mmPerPx;
+          rollForIris  = aruco.rollRad;
+          rollDeg      = Math.abs(aruco.rollDeg);
+          const arucoMaxRoll = adaptiveRollMax(100);
+          rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(arucoMaxRoll-SOFT_ROLL_DEG));
+          asymm        = 1.0; distStatus='ok'; ipdPx=100;
+          scaleSource  = 'aruco';
+          $('scaleBadge').className='aruco';
+          $('scaleBadge').textContent=`▲ ${activeScale.toFixed(4)}mm/px`;
         } else if(lmScale){
           activeScale  = lmScale.mmPerPx;
           rollForIris  = lmScale.roll;
@@ -736,9 +774,8 @@ async function loop(){
         const roll=rollForIris||0;
         const rRadVid=irisRadiusCorrected(kps,468,469,roll); // subject RIGHT
         const lRadVid=irisRadiusCorrected(kps,473,474,roll); // subject LEFT
-        // Parallax correction: iris is recessed ~8mm behind cornea surface.
-        // Only apply for landmark scale (which measures at cornea plane).
-        // ArUco depth correction already accounts for plane offset.
+        // Parallax correction for iris recess. Apply for lm and blended aruco+lm.
+        // Pure aruco-only skips it (marker plane already offset).
         const pf = (activeScale && scaleSource==='lm') ? parallaxFactor(activeScale) : 1;
         const lMm=activeScale?lRadVid*2*activeScale*pf:null;
         const rMm=activeScale?rRadVid*2*activeScale*pf:null;
@@ -809,8 +846,12 @@ async function loop(){
           updateRing(elapsed);
           if(lMm&&rMm&&poseOk){
             S.samples.push({lMm,rMm,scale:activeScale,scaleSource,
+              arucoScale: aruco ? aruco.mmPerPx : null,
+              lmScale: lmScale ? lmScale.mmPerPx : null,
               rollDeg,rollWeight,asymm:asymm||1,pFactor:pf});
             S.allRaw.push({t:Date.now(),lMm,rMm,scale:activeScale,scaleSource,
+              arucoScale: aruco ? aruco.mmPerPx : null,
+              lmScale: lmScale ? lmScale.mmPerPx : null,
               rollDeg,rollWeight,asymm:asymm||1,pFactor:pf});
           }
           if(elapsed>=REC_SECS*1000){S.recording=false;finalize();}
@@ -938,21 +979,41 @@ $('retryBtn').onclick=()=>{
   $('ciL').innerHTML='';$('ciR').innerHTML='';
   $('exportBtn').disabled=true;$('actionRow').style.display='none';
   $('recRow').style.display='flex';$('recRing').style.display='none';
+  $('summaryRow').style.display='none';$('summaryText').innerHTML='';
   $('instr').innerHTML=`<span>Third Eye active.</span> Look straight at camera.`;
   setStatus('READY','on');toast('Cleared');
 };
 
 $('exportBtn').onclick=()=>{
   const ts=new Date().toISOString().replace(/[:.]/g,'-');
-  const rows=['timestamp_ms,left_mm,right_mm,scale_mm_per_px,scale_source,roll_deg,roll_weight,asymm,parallax_pct'];
+  const rows=['timestamp_ms,left_mm,right_mm,scale_mm_per_px,scale_source,aruco_scale,lm_scale,blended,roll_deg,roll_weight,asymm,parallax_pct'];
   S.allRaw.forEach(r=>{
-    rows.push(`${r.t},${r.lMm.toFixed(4)},${r.rMm.toFixed(4)},${r.scale.toFixed(6)},${r.scaleSource},${r.rollDeg.toFixed(2)},${(r.rollWeight||1).toFixed(3)},${(r.asymm||1).toFixed(3)},${((1-r.pFactor)*100).toFixed(2)}`);
+    const blended = (r.arucoScale!==null && r.lmScale!==null) ? 1 : 0;
+    rows.push([
+      r.t,
+      r.lMm.toFixed(4), r.rMm.toFixed(4),
+      r.scale.toFixed(6), r.scaleSource,
+      r.arucoScale!==null ? r.arucoScale.toFixed(6) : '',
+      r.lmScale!==null    ? r.lmScale.toFixed(6)    : '',
+      blended,
+      r.rollDeg.toFixed(2), (r.rollWeight||1).toFixed(3),
+      (r.asymm||1).toFixed(3), ((1-r.pFactor)*100).toFixed(2)
+    ].join(','));
   });
-  rows.push('','# SUMMARY','side,mean_mm,ci95_mm,n,se_mm,scale_source');
-  const arucoFrac=S.allRaw.filter(r=>r.scaleSource==='aruco').length/Math.max(1,S.allRaw.length);
-  if(S.statsL) rows.push(`L,${S.statsL.mean.toFixed(4)},${S.statsL.ci.toFixed(4)},${S.statsL.n},${S.statsL.se.toFixed(4)},${arucoFrac>0.5?'aruco':'lm'}`);
-  if(S.statsR) rows.push(`R,${S.statsR.mean.toFixed(4)},${S.statsR.ci.toFixed(4)},${S.statsR.n},${S.statsR.se.toFixed(4)},${arucoFrac>0.5?'aruco':'lm'}`);
-  if(S.statsL&&S.statsR) rows.push(`delta,${Math.abs(S.statsL.mean-S.statsR.mean).toFixed(4)},,,`);
+  rows.push('','# SUMMARY','side,mean_mm,ci95_mm,n,se_mm,scale_source,aruco_frames,lm_frames,blended_frames');
+  const arucoFrames = S.allRaw.filter(r=>r.scaleSource==='aruco' && r.arucoScale!==null && r.lmScale===null).length;
+  const lmFrames    = S.allRaw.filter(r=>r.scaleSource==='lm').length;
+  const blendFrames = S.allRaw.filter(r=>r.arucoScale!==null && r.lmScale!==null).length;
+  const dominantSrc = blendFrames+arucoFrames > lmFrames ? 'aruco' : 'lm';
+  if(S.statsL) rows.push(`L_best,${S.statsL.mean.toFixed(4)},${S.statsL.ci.toFixed(4)},${S.statsL.n},${S.statsL.se.toFixed(4)},${dominantSrc},${arucoFrames},${lmFrames},${blendFrames}`);
+  if(S.statsR) rows.push(`R_best,${S.statsR.mean.toFixed(4)},${S.statsR.ci.toFixed(4)},${S.statsR.n},${S.statsR.se.toFixed(4)},${dominantSrc},${arucoFrames},${lmFrames},${blendFrames}`);
+  if(S.statsL&&S.statsR) rows.push(`delta_best,${Math.abs(S.statsL.mean-S.statsR.mean).toFixed(4)},,,,,,`);
+  // Trial mean (all valid frames)
+  const allL=S.allRaw.map(r=>r.lMm), allR=S.allRaw.map(r=>r.rMm);
+  const trialStatsL=computeStats(allL), trialStatsR=computeStats(allR);
+  if(trialStatsL) rows.push(`L_trial,${trialStatsL.mean.toFixed(4)},${trialStatsL.ci.toFixed(4)},${trialStatsL.n},${trialStatsL.se.toFixed(4)},${dominantSrc},${arucoFrames},${lmFrames},${blendFrames}`);
+  if(trialStatsR) rows.push(`R_trial,${trialStatsR.mean.toFixed(4)},${trialStatsR.ci.toFixed(4)},${trialStatsR.n},${trialStatsR.se.toFixed(4)},${dominantSrc},${arucoFrames},${lmFrames},${blendFrames}`);
+  if(trialStatsL&&trialStatsR) rows.push(`delta_trial,${Math.abs(trialStatsL.mean-trialStatsR.mean).toFixed(4)},,,,,,`);
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);a.download=`thirdiris_${ts}.csv`;a.click();
