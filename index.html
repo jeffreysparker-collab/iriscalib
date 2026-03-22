@@ -296,6 +296,7 @@ const ANCHORS = [
 ];
 const CORNEAL_MM = 8.0;
 const IPD_MM_MEAN = 63.0;
+const FOREHEAD_DEPTH_MM = 13.0; // forehead protrudes ~13mm in front of corneal plane
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
@@ -669,17 +670,24 @@ async function loop(){
         let activeScale, rollForIris, rollDeg, rollWeight, asymm, distStatus, ipdPx, scaleSource;
 
         if(aruco){
-          // ArUco gives us exact scale and roll
-          activeScale  = aruco.mmPerPx;
+          // ArUco gives us exact scale at the marker plane.
+          // The forehead is ~FOREHEAD_DEPTH_MM closer to the camera than the corneal plane,
+          // so the marker appears larger (mmPerPx smaller) than at the eye plane.
+          // Estimate camera distance from IPD: d_mm ≈ IPD_MM_MEAN / (ipdPx * aruco.mmPerPx)
+          const ipdPxRaw = lmScale ? lmScale.ipdPx : 100;
+          const dEye_mm  = IPD_MM_MEAN / (ipdPxRaw * aruco.mmPerPx + 0.001);
+          const depthCorr = dEye_mm / Math.max(1, dEye_mm - FOREHEAD_DEPTH_MM);
+          activeScale  = aruco.mmPerPx * depthCorr;
           rollForIris  = aruco.rollRad;
           rollDeg      = Math.abs(aruco.rollDeg);
           rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(MAX_ROLL_DEG-SOFT_ROLL_DEG));
-          // Still use landmark yaw/dist metrics
+          // Still use landmark yaw/dist metrics — but dist is not a gating condition with ArUco
           asymm        = lmScale ? lmScale.asymm : 1.0;
-          distStatus   = lmScale ? lmScale.distStatus : 'ok';
-          ipdPx        = lmScale ? lmScale.ipdPx : 100;
+          distStatus   = 'ok'; // ArUco works at close range — don't gate on distance
+          ipdPx        = ipdPxRaw;
           scaleSource  = 'aruco';
           $('scaleBadge').className='aruco';
+          $('scaleBadge').textContent=`▲ ${activeScale.toFixed(4)}mm/px (corr ${depthCorr.toFixed(3)}×)`;
         } else if(lmScale){
           activeScale  = lmScale.mmPerPx;
           rollForIris  = lmScale.roll;
@@ -765,7 +773,7 @@ async function loop(){
         $('dbg5').textContent=`samples:${S.samples.length}  aruco_frames:${S.samples.filter(f=>f.scaleSource==='aruco').length}  detector:${S.arucoDetector?'✓':'MISSING'}  ns:${Object.keys(window).filter(k=>k.toLowerCase().includes('aruco')||k==='AR').join(',')||'none'}`;
 
         // ── Record ────────────────────────────────────────────────────────
-        const poseOk = rollDeg<=MAX_ROLL_DEG && distStatus==='ok' && activeScale;
+        const poseOk = rollDeg<=MAX_ROLL_DEG && (scaleSource==='aruco' || distStatus==='ok') && activeScale;
         if(S.recording && S.recStart){
           const elapsed=Date.now()-S.recStart;
           updateRing(elapsed);
