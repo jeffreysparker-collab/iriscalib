@@ -346,21 +346,64 @@ function canvasScale(){
 let arucoCtx = null;  // offscreen canvas context for ArUco
 function setupArucoCanvas(){
   const c = document.createElement('canvas');
-  c.width = 320; c.height = 240; // downscale for speed
+  c.width = 320; c.height = 320; // square, used for forehead crop
   arucoCtx = c.getContext('2d');
 }
 
-function detectAruco(){
+// If kps provided, crop to forehead region for better detection at distance.
+// Forehead landmarks: top of head ~10,338,297,299 / brow ~66,107,9,8
+function detectAruco(kps){
   if(!S.arucoDetector || !arucoCtx) return null;
   const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  // Mirror the canvas to match the CSS-mirrored video display
-  // ArUco markers are not symmetric — must detect on the same orientation the user sees
-  arucoCtx.save();
-  arucoCtx.translate(320, 0);
-  arucoCtx.scale(-1, 1);
-  arucoCtx.drawImage(video, 0,0, 320, 240);
-  arucoCtx.restore();
-  const imageData = arucoCtx.getImageData(0,0,320,240);
+
+  let sx=1, sy=1, cropX=0, cropY=0, cropW=vw, cropH=vh;
+  const OUT=320;
+
+  if(kps && kps.length>=478){
+    // Forehead region: use brow landmarks + head-top landmarks to define crop
+    // Brow top: 10 (top of head), 338,297,299,333 (right brow), 108,69,67,109 (left brow)
+    // Use eye corners to set width, scale up generously for marker
+    const leftTemple  = kps[127];  // left temple
+    const rightTemple = kps[356];  // right temple
+    const browCenter  = kps[10];   // top of head / forehead center
+    const noseTop     = kps[8];    // just above nose bridge — bottom of forehead
+
+    const faceW = Math.abs(rightTemple.x - leftTemple.x);
+    const pad   = faceW * 0.15;   // small horizontal padding
+
+    cropX = Math.max(0, Math.min(leftTemple.x, rightTemple.x) - pad);
+    const cropRight = Math.min(vw, Math.max(leftTemple.x, rightTemple.x) + pad);
+    cropW = cropRight - cropX;
+
+    // Vertical: from top-of-head landmark up to just above nose bridge
+    const topY    = Math.max(0, browCenter.y - faceW * 0.55);
+    const bottomY = Math.min(vh, noseTop.y + faceW * 0.05);
+    cropY = topY;
+    cropH = Math.max(1, bottomY - topY);
+
+    // Scale factors from crop space → video space (for corner remapping)
+    sx = cropW / OUT;
+    sy = cropH / OUT;
+
+    // Draw mirrored crop into offscreen canvas at full OUT×OUT resolution
+    arucoCtx.save();
+    arucoCtx.translate(OUT, 0);
+    arucoCtx.scale(-1, 1);
+    arucoCtx.drawImage(video,
+      vw - cropX - cropW, cropY, cropW, cropH,  // source: un-mirror X for crop
+      0, 0, OUT, OUT);
+    arucoCtx.restore();
+  } else {
+    // No landmarks yet — fall back to full mirrored frame
+    arucoCtx.save();
+    arucoCtx.translate(OUT, 0);
+    arucoCtx.scale(-1, 1);
+    arucoCtx.drawImage(video, 0, 0, OUT, OUT);
+    arucoCtx.restore();
+    sx = vw / OUT; sy = vh / OUT;
+  }
+
+  const imageData = arucoCtx.getImageData(0,0,OUT,OUT);
   let markers;
   try{ markers = S.arucoDetector.detect(imageData); }
   catch(e){ console.warn('[ThirdIris] aruco detect error:',e); return null; }
@@ -368,12 +411,13 @@ function detectAruco(){
 
   // Take first marker (ID 0 preferred, else whatever we see)
   const m = markers.find(m=>m.id===0) || markers[0];
-  const corners = m.corners; // [{x,y}] in 320×240 space
+  const corners = m.corners; // [{x,y}] in OUT×OUT crop space
 
-  // Scale corners back to video pixel space
-  const sx = vw/320, sy = vh/240;
-  // Un-mirror X coords back to raw video space (we drew mirrored, so flip X back)
-  const vc = corners.map(c=>({x:(320-c.x)*sx, y:c.y*sy}));
+  // Remap corners: un-mirror X, then back to video pixel space
+  const vc = corners.map(c=>({
+    x: cropX + (OUT - c.x) * sx,
+    y: cropY + c.y * sy
+  }));
 
   // Side length in video pixels (average all 4 sides)
   const sidePx = (
@@ -383,7 +427,7 @@ function detectAruco(){
     Math.hypot(vc[0].x-vc[3].x, vc[0].y-vc[3].y)
   )/4;
 
-  if(sidePx < 8) return null; // too small / bad detection
+  if(sidePx < 6) return null; // too small / bad detection
 
   const mmPerPx = ARUCO_SIZE_MM / sidePx;
 
@@ -581,8 +625,19 @@ async function loop(){
   octx.clearRect(0,0,overlay.width,overlay.height);
 
   try{
-    // ── ArUco detection (every frame, fast) ──────────────────────────────
-    const aruco=detectAruco();
+    // ── Face landmark detection (first, so we can crop forehead for ArUco) ──
+    const faces=await S.detector.estimateFaces(video,{flipHorizontal:false});
+
+    // ── ArUco detection (forehead-cropped if landmarks available) ──────────
+    let kpsForAruco = null;
+    if(faces.length){
+      let kpsTmp=faces[0].keypoints;
+      const vwTmp=video.videoWidth||1280, vhTmp=video.videoHeight||720;
+      if(Math.max(...kpsTmp.slice(0,10).map(p=>p.x))<2)
+        kpsTmp=kpsTmp.map(p=>({x:p.x*vwTmp,y:p.y*vhTmp}));
+      if(kpsTmp.length>=478) kpsForAruco=kpsTmp;
+    }
+    const aruco=detectAruco(kpsForAruco);
     if(aruco){
       S.arucoScale=aruco.mmPerPx;
       S.arucoRoll=aruco.rollRad;
@@ -598,9 +653,6 @@ async function loop(){
       }
     }
     drawArucoOverlay(aruco);
-
-    // ── Face landmark detection ───────────────────────────────────────────
-    const faces=await S.detector.estimateFaces(video,{flipHorizontal:false});
 
     if(faces.length){
       let kps=faces[0].keypoints;
