@@ -1,5 +1,5 @@
 
-const CACHE = 'iriscalib-v1';
+const CACHE = 'iriscalib-v2';
 const SHELL = [
   './iris_calibrate.html',
   './manifest.json',
