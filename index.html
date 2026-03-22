@@ -670,13 +670,17 @@ async function loop(){
         let activeScale, rollForIris, rollDeg, rollWeight, asymm, distStatus, ipdPx, scaleSource;
 
         if(aruco){
-          // ArUco gives us exact scale at the marker plane.
-          // The forehead is ~FOREHEAD_DEPTH_MM closer to the camera than the corneal plane,
-          // so the marker appears larger (mmPerPx smaller) than at the eye plane.
-          // Estimate camera distance from IPD: d_mm ≈ IPD_MM_MEAN / (ipdPx * aruco.mmPerPx)
-          const ipdPxRaw = lmScale ? lmScale.ipdPx : 100;
-          const dEye_mm  = IPD_MM_MEAN / (ipdPxRaw * aruco.mmPerPx + 0.001);
-          const depthCorr = dEye_mm / Math.max(1, dEye_mm - FOREHEAD_DEPTH_MM);
+          // ArUco marker sits on the forehead, which is ~FOREHEAD_DEPTH_MM *behind*
+          // (farther from lens than) the corneal plane. So the marker appears slightly
+          // smaller → mmPerPx is slightly too large. Correct downward:
+          //   scale_eye = scale_marker × (d_eye - FOREHEAD_DEPTH_MM) / d_eye
+          const ipdPxRaw = lmScale ? lmScale.ipdPx : null;
+          let depthCorr = 1.0;
+          if(ipdPxRaw && ipdPxRaw > 20){
+            const dEye_mm = IPD_MM_MEAN / (ipdPxRaw * aruco.mmPerPx);
+            if(dEye_mm > FOREHEAD_DEPTH_MM + 50)
+              depthCorr = (dEye_mm - FOREHEAD_DEPTH_MM) / dEye_mm;
+          }
           activeScale  = aruco.mmPerPx * depthCorr;
           rollForIris  = aruco.rollRad;
           rollDeg      = Math.abs(aruco.rollDeg);
@@ -684,7 +688,7 @@ async function loop(){
           // Still use landmark yaw/dist metrics — but dist is not a gating condition with ArUco
           asymm        = lmScale ? lmScale.asymm : 1.0;
           distStatus   = 'ok'; // ArUco works at close range — don't gate on distance
-          ipdPx        = ipdPxRaw;
+          ipdPx        = ipdPxRaw || 100;
           scaleSource  = 'aruco';
           $('scaleBadge').className='aruco';
           $('scaleBadge').textContent=`▲ ${activeScale.toFixed(4)}mm/px (corr ${depthCorr.toFixed(3)}×)`;
@@ -708,10 +712,17 @@ async function loop(){
         }
 
         // ── Iris measurements ─────────────────────────────────────────────
+        // MediaPipe landmark indices (camera-facing, video NOT flipped):
+        //   468 = subject's RIGHT iris center (appears on LEFT of screen)
+        //   473 = subject's LEFT  iris center (appears on RIGHT of screen)
+        // We label by subject anatomy: R=subject's right, L=subject's left
         const roll=rollForIris||0;
-        const lRadVid=irisRadiusCorrected(kps,468,469,roll);
-        const rRadVid=irisRadiusCorrected(kps,473,474,roll);
-        const pf=activeScale?parallaxFactor(activeScale):1;
+        const rRadVid=irisRadiusCorrected(kps,468,469,roll); // subject RIGHT
+        const lRadVid=irisRadiusCorrected(kps,473,474,roll); // subject LEFT
+        // Parallax correction: iris is recessed ~8mm behind cornea surface.
+        // Only apply for landmark scale (which measures at cornea plane).
+        // ArUco depth correction already accounts for plane offset.
+        const pf = (activeScale && scaleSource==='lm') ? parallaxFactor(activeScale) : 1;
         const lMm=activeScale?lRadVid*2*activeScale*pf:null;
         const rMm=activeScale?rRadVid*2*activeScale*pf:null;
 
@@ -734,7 +745,8 @@ async function loop(){
         setPoseArc('aruco','val-aruco','pind-aruco',arucoT,aruco?'✓':'—');
 
         // ── Draw iris circles ─────────────────────────────────────────────
-        [[468,'#7b8fff',lRadVid*sc,lMm,'L'],[473,'#ff6b9d',rRadVid*sc,rMm,'R']]
+        // 468=subject RIGHT (screen left), 473=subject LEFT (screen right)
+        [[468,'#ff6b9d',rRadVid*sc,rMm,'R'],[473,'#7b8fff',lRadVid*sc,lMm,'L']]
         .forEach(([ci,col,radCss,mm,side])=>{
           const {cx,cy}=videoPxToCanvas(kps[ci].x,kps[ci].y);
           // Outer ring: color by quality
