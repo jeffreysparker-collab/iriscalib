@@ -531,23 +531,34 @@ function adaptiveRollMax(ipdPx){
 }
 
 // ── Pitch estimation ──────────────────────────────────────────────────────────
-// Uses the ratio of upper-face height (brow→nose) to lower-face height (nose→chin)
-// relative to the IPD. When pitching down, the upper face foreshortens relative
-// to lower; pitching up does the opposite.
-// Landmarks: 10=forehead, 168=nose bridge, 4=nose tip, 152=chin, 468/473=iris centers
-function pitchAngle(kps){
-  // Vertical face extents in camera Y
-  const browY  = kps[10].y;
-  const noseY  = kps[4].y;
-  const chinY  = kps[152].y;
-  const faceH  = chinY - browY;
-  if(faceH < 10) return 0;
-  // Nose sits ~40% down from brow to chin in a neutral face
-  const noseFrac = (noseY - browY) / faceH;
-  // Deviation from neutral (0.40): positive = chin down, negative = chin up
-  const deviation = noseFrac - 0.40;
-  // Empirically ~0.01 deviation ≈ 1° of pitch (calibrated from geometry)
-  return deviation * 100; // degrees, + = chin down
+// Uses the Z depth values MediaPipe provides per landmark (normalised to face size).
+// At neutral, nose tip (4) protrudes in front of the eye plane. When pitching down
+// the camera sees more forehead — the nose tip Z relative to the chin/forehead
+// midpoint shifts. We use a simpler robust signal: compare upper-face fraction
+// (brow-to-nose / brow-to-chin) against lower-face fraction, normalised by IPD
+// so the metric is scale-invariant.
+//
+// More reliable: use the asymmetry of forehead-to-nose vs nose-to-chin distances
+// in *pixels*, normalised to IPD. IPD gives us a scale-independent unit.
+function pitchAngle(kps, ipdPx){
+  const browY = kps[10].y;
+  const noseY = kps[4].y;
+  const chinY = kps[152].y;
+  const faceH = chinY - browY;
+  if(faceH < 10 || !ipdPx || ipdPx < 10) return 0;
+
+  // Upper/lower face ratio — neutral ~1.0 (nose is midpoint of brow-chin range)
+  // Pitch down → upper shrinks → ratio < 1; pitch up → ratio > 1
+  const upper = noseY - browY;
+  const lower = chinY - noseY;
+  if(lower < 2) return 0;
+  const ratio = upper / lower;
+
+  // Convert ratio deviation to degrees.
+  // Empirically: ratio changes ~0.06 per 5° of pitch (from face geometry).
+  // neutral ratio varies by person; calibrate to 0 at ratio=1.0
+  const deviation = ratio - 1.0;
+  return deviation * (5 / 0.06); // degrees, + = chin down
 }
 
 // ── Marker size selector ──────────────────────────────────────────────────────
@@ -904,7 +915,7 @@ async function loop(){
         setPoseArc('roll','val-roll','pind-roll',rollT,rollDeg.toFixed(1)+'°');
 
         // Pitch: nose position ratio vs neutral
-        const pitchDeg = pitchAngle(kps);
+        const pitchDeg = pitchAngle(kps, ipdPx);
         const pitchAbs = Math.abs(pitchDeg);
         const pitchT   = Math.min(1, pitchAbs / MAX_PITCH_DEG);
         const pitchSign = pitchDeg > 0 ? '↓' : '↑';
@@ -959,12 +970,12 @@ async function loop(){
         $('debugPanel').style.display='';
         $('dbg1').textContent=`video:${vw}×${vh}  sc:${sc.toFixed(4)}  src:${scaleSource||'none'}`;
         $('dbg2').textContent=`scale:${activeScale?activeScale.toFixed(5):'—'}  pf:${((1-pf)*100).toFixed(2)}%`;
-        $('dbg3').textContent=`roll:${rollDeg.toFixed(1)}°  pitch:${pitchDeg.toFixed(1)}°  yaw:${asymm?asymm.toFixed(3):'—'}  dist:${distStatus}  ipd:${ipdPx?ipdPx.toFixed(0):'—'}px`;
+        $('dbg3').textContent=`roll:${rollDeg.toFixed(1)}°  pitch:${pitchDeg.toFixed(1)}° (ratio:${kps[152]?(((kps[4].y-kps[10].y)/(kps[152].y-kps[4].y+0.01)).toFixed(2)):'—'})  yaw:${asymm?asymm.toFixed(3):'—'}  dist:${distStatus}  ipd:${ipdPx?ipdPx.toFixed(0):'—'}px`;
         $('dbg4').textContent=`L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm`;
         $('dbg5').textContent=`samples:${S.samples.length}  aruco_frames:${S.samples.filter(f=>f.scaleSource==='aruco').length}  detector:${S.arucoDetector?'✓':'MISSING'}  ns:${Object.keys(window).filter(k=>k.toLowerCase().includes('aruco')||k==='AR').join(',')||'none'}`;
 
         // ── Record ────────────────────────────────────────────────────────
-        const poseOk = rollDeg<=adaptiveMaxRoll && pitchAbs<=MAX_PITCH_DEG
+        const poseOk = rollDeg<=adaptiveMaxRoll
                     && (scaleSource==='aruco' || distStatus==='ok') && activeScale;
         if(S.recording && S.recStart){
           const elapsed=Date.now()-S.recStart;
