@@ -157,6 +157,13 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
   <header>
     <div class="logo"><span class="t1">Third</span><span class="t2">·</span><span class="t2">Iris</span></div>
     <div id="scaleBadge" class="none">NO SCALE</div>
+    <div style="display:flex;align-items:center;gap:3px;margin-left:4px">
+      <span style="font-family:var(--mono);font-size:9px;color:var(--dim)">▲</span>
+      <button onclick="setMarkerSize(20)" id="sz20" class="szBtn active">20</button>
+      <button onclick="setMarkerSize(40)" id="sz40" class="szBtn">40</button>
+      <button onclick="setMarkerSize(60)" id="sz60" class="szBtn">60</button>
+      <span style="font-family:var(--mono);font-size:9px;color:var(--dim)">mm</span>
+    </div>
     <div class="pill"><div class="dot" id="dot"></div><span id="stxt">IDLE</span></div>
   </header>
 
@@ -265,15 +272,8 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 
     <!-- ArUco hint (shown until marker detected) -->
     <div id="arucoHint">
-      <span>▲ THIRD EYE CALIBRATION</span> — print an ArUco marker (MIP_36h12, ID 0) and stick it to your forehead for exact scale.<br>
-      Generate at: <span class="url">chev.me/arucogen</span> · Dict: MIP_36h12 · ID: 0<br>
-      Marker size:
-      <span id="sizeButtons" style="display:inline-flex;gap:4px;margin-left:4px">
-        <button onclick="setMarkerSize(20)"  id="sz20"  class="szBtn active">20mm</button>
-        <button onclick="setMarkerSize(40)"  id="sz40"  class="szBtn">40mm</button>
-        <button onclick="setMarkerSize(60)"  id="sz60"  class="szBtn">60mm</button>
-      </span>
-      &nbsp;·&nbsp;recommended: <span id="sizeRec" style="color:var(--accent)">40–60mm for best accuracy at working distance</span><br>
+      <span>▲ THIRD EYE CALIBRATION</span> — print an ArUco marker (MIP_36h12, ID 0) and stick it to your forehead.<br>
+      Generate at: <span class="url">chev.me/arucogen</span> · Dict: MIP_36h12 · ID: 0 · match size to header selector<br>
       Without marker: landmark geometry used (~±0.3mm systematic uncertainty).
     </div>
 
@@ -554,11 +554,7 @@ function pitchAngle(kps){
 function setMarkerSize(mm){
   ARUCO_SIZE_MM = mm;
   ['20','40','60'].forEach(s=>$('sz'+s).classList.toggle('active', Number(s)===mm));
-  const rec = mm===20 ? 'best at 30–50cm distance'
-            : mm===40 ? 'best at 50–80cm distance'
-            :           'best at 60–100cm distance';
-  $('sizeRec').textContent = `${mm}mm — ${rec}`;
-  toast(`Marker size set to ${mm}mm`);
+  toast(`Marker size: ${mm}mm`);
 }
 
 function rollAngle(kps){
