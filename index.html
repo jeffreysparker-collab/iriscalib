@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>IrisMeasure</title>
+<title>Third Iris</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -24,16 +24,27 @@ header{
   background:var(--surf);border-bottom:1px solid var(--border);
   flex-shrink:0;position:sticky;top:0;z-index:5;
 }
-.logo{font-size:17px;font-weight:800;color:var(--accent);letter-spacing:-.5px}
-.logo span{color:var(--dim);font-weight:400}
+.logo{font-size:17px;font-weight:800;letter-spacing:-.5px}
+.logo .t1{color:var(--accent2)}
+.logo .t2{color:var(--accent)}
+.logo .t3{color:var(--dim);font-weight:400}
 .pill{margin-left:auto;display:flex;align-items:center;gap:6px;padding:4px 11px;
   border-radius:20px;background:var(--surf2);border:1px solid var(--border);
   font-family:var(--mono);font-size:11px;color:var(--dim)}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:background .3s}
-.dot.on{background:var(--accent);box-shadow:0 0 7px var(--accent)}
-.dot.rec{background:var(--accent3);box-shadow:0 0 7px var(--accent3);animation:blink .7s infinite alternate}
-.dot.warn{background:var(--warn);box-shadow:0 0 7px var(--warn)}
+.dot.on  {background:var(--accent); box-shadow:0 0 7px var(--accent)}
+.dot.rec {background:var(--accent3);box-shadow:0 0 7px var(--accent3);animation:blink .7s infinite alternate}
+.dot.warn{background:var(--warn);   box-shadow:0 0 7px var(--warn)}
 @keyframes blink{from{opacity:.4}to{opacity:1}}
+
+/* Scale badge */
+#scaleBadge{
+  font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:4px;
+  transition:all .3s;
+}
+#scaleBadge.aruco  {background:rgba(74,240,200,.1);border:1px solid rgba(74,240,200,.4);color:var(--accent)}
+#scaleBadge.lm     {background:rgba(123,143,255,.1);border:1px solid rgba(123,143,255,.3);color:var(--accent2)}
+#scaleBadge.none   {background:var(--surf2);border:1px solid var(--border);color:var(--dim)}
 
 #camwrap{
   position:relative;width:100%;
@@ -53,22 +64,28 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 #instr{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.8;min-height:32px}
 #instr span{color:var(--accent)}
 #instr .warn{color:var(--warn)}
+#instr .aruco{color:var(--accent)}
 
-/* Pose badge */
-#poseBadge{
-  font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:5px;
-  display:inline-flex;align-items:center;gap:6px;transition:all .25s;
+/* Four-corner pose indicators row */
+#poseRow{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px}
+.pind{
+  background:var(--surf2);border:1px solid var(--border);border-radius:6px;
+  padding:7px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;
 }
-#poseBadge.ok    {background:rgba(74,240,200,.08); border:1px solid rgba(74,240,200,.3);  color:var(--accent)}
-#poseBadge.warn  {background:rgba(255,179,71,.08);  border:1px solid rgba(255,179,71,.4);  color:var(--warn)}
-#poseBadge.bad   {background:rgba(255,107,157,.08); border:1px solid rgba(255,107,157,.4); color:var(--accent3)}
-#poseBadge.hidden{display:none}
+.pind-label{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:.8px}
+.pind-arc{width:32px;height:32px;position:relative}
+.pind-arc svg{width:100%;height:100%;transform:rotate(-90deg)}
+.pind-arc .arc-bg  {fill:none;stroke:var(--surf);stroke-width:4}
+.pind-arc .arc-fill{fill:none;stroke-width:4;stroke-linecap:round;
+  stroke-dasharray:88;stroke-dashoffset:88;transition:stroke-dashoffset .15s,stroke .15s}
+.pind-val{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:9px;font-weight:700}
 
 /* Progress ring */
 #recRing{display:none;flex-direction:column;align-items:center;gap:8px}
 .ring-wrap{position:relative;width:80px;height:80px}
 .ring-wrap svg{transform:rotate(-90deg)}
-.ring-bg{fill:none;stroke:var(--surf2);stroke-width:6}
+.ring-bg  {fill:none;stroke:var(--surf2);stroke-width:6}
 .ring-fill{fill:none;stroke:var(--accent3);stroke-width:6;stroke-linecap:round;
   stroke-dasharray:220;stroke-dashoffset:220;transition:stroke-dashoffset .15s linear}
 .ring-time{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -105,6 +122,16 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 .btn-export{border-color:rgba(74,240,200,.25);color:var(--accent);background:rgba(74,240,200,.04);font-size:10px}
 .btn-export:disabled{opacity:.3;cursor:default;pointer-events:none}
 
+/* ArUco hint */
+#arucoHint{
+  font-family:var(--mono);font-size:10px;color:var(--dim);
+  background:var(--surf2);border:1px solid var(--border);
+  border-radius:6px;padding:10px 12px;line-height:1.8;
+  display:none;
+}
+#arucoHint span{color:var(--accent)}
+#arucoHint .url{color:var(--accent2);word-break:break-all}
+
 /* Debug */
 #debugPanel{display:none;font-family:var(--mono);font-size:9px;color:var(--dim);
   background:var(--surf2);border:1px solid var(--border);border-radius:6px;
@@ -121,7 +148,8 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 <body>
 <div id="app">
   <header>
-    <div class="logo">Iris<span>Measure</span></div>
+    <div class="logo"><span class="t1">Third</span><span class="t2">·</span><span class="t2">Iris</span></div>
+    <div id="scaleBadge" class="none">NO SCALE</div>
     <div class="pill"><div class="dot" id="dot"></div><span id="stxt">IDLE</span></div>
   </header>
 
@@ -132,8 +160,43 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 
   <div id="panel">
 
-    <div id="instr">Tap <span>▶ START</span> then look straight at the camera.</div>
-    <div id="poseBadge" class="hidden">—</div>
+    <div id="instr">Tap <span>▶ START</span> — then look straight at the camera.</div>
+
+    <!-- Four corner pose indicators -->
+    <div id="poseRow">
+      <div class="pind" id="pind-roll">
+        <div class="pind-label">ROLL</div>
+        <div class="pind-arc">
+          <svg viewBox="0 0 36 36"><circle class="arc-bg" cx="18" cy="18" r="14"/>
+            <circle class="arc-fill" id="arc-roll" cx="18" cy="18" r="14"/></svg>
+          <div class="pind-val" id="val-roll">—</div>
+        </div>
+      </div>
+      <div class="pind" id="pind-yaw">
+        <div class="pind-label">YAW</div>
+        <div class="pind-arc">
+          <svg viewBox="0 0 36 36"><circle class="arc-bg" cx="18" cy="18" r="14"/>
+            <circle class="arc-fill" id="arc-yaw" cx="18" cy="18" r="14"/></svg>
+          <div class="pind-val" id="val-yaw">—</div>
+        </div>
+      </div>
+      <div class="pind" id="pind-dist">
+        <div class="pind-label">DIST</div>
+        <div class="pind-arc">
+          <svg viewBox="0 0 36 36"><circle class="arc-bg" cx="18" cy="18" r="14"/>
+            <circle class="arc-fill" id="arc-dist" cx="18" cy="18" r="14"/></svg>
+          <div class="pind-val" id="val-dist">—</div>
+        </div>
+      </div>
+      <div class="pind" id="pind-aruco">
+        <div class="pind-label">ARUCO</div>
+        <div class="pind-arc">
+          <svg viewBox="0 0 36 36"><circle class="arc-bg" cx="18" cy="18" r="14"/>
+            <circle class="arc-fill" id="arc-aruco" cx="18" cy="18" r="14"/></svg>
+          <div class="pind-val" id="val-aruco">—</div>
+        </div>
+      </div>
+    </div>
 
     <!-- Recording ring -->
     <div id="recRing">
@@ -176,6 +239,13 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
       <button class="btn btn-export" id="exportBtn" disabled>↓ EXPORT CSV</button>
     </div>
 
+    <!-- ArUco hint (shown until marker detected) -->
+    <div id="arucoHint">
+      <span>▲ THIRD EYE CALIBRATION</span> — print a 20mm ArUco marker (4×4_50, ID 0) and stick it to your forehead for exact scale.<br>
+      Generate at: <span class="url">chev.me/arucogen</span> · Dict: 4×4_50 · ID: 0 · Size: 20mm<br>
+      Without marker: landmark geometry used (~±0.3mm systematic uncertainty).
+    </div>
+
     <!-- Debug -->
     <div id="debugPanel">
       <div class="dlbl">DEBUG</div>
@@ -183,560 +253,605 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
       <div id="dbg2">—</div>
       <div id="dbg3">—</div>
       <div id="dbg4">—</div>
+      <div id="dbg5">—</div>
     </div>
 
   </div>
 </div>
 <div id="toast"></div>
 
+<!-- ArUco pure-JS (no CDN issues, ~18kb) -->
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@1.1.3/src/aruco.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@1.1.3/src/posit1.js" crossorigin="anonymous"></script>
+<!-- Face landmarks -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.5/dist/face-landmarks-detection.min.js" crossorigin="anonymous"></script>
+
 <script>
 const $ = id => document.getElementById(id);
-const REC_SECS = 30;
-const CIRC = 2 * Math.PI * 35; // SVG ring circumference for r=35
 
-// ── state ─────────────────────────────────────────────────────────────────────
+// ── Tunable constants ─────────────────────────────────────────────────────────
+const REC_SECS        = 30;
+const BEST_N          = 100;    // take best N frames from the 30s recording
+const ARUCO_SIZE_MM   = 20.0;   // physical marker side length
+const CIRC_RING       = 2 * Math.PI * 35;
+
+// Pose thresholds — from sweep analysis
+const MAX_ROLL_DEG    = 4;
+const SOFT_ROLL_DEG   = 2;
+const MAX_YAW_ASYMM   = 1.35;
+const IPD_TOO_CLOSE   = 150;    // px
+const IPD_TOO_FAR     = 72;     // px
+
+// Landmark anchor weights (unchanged from previous)
+const ANCHORS = [
+  [263, 362, 30.0, 1.8],
+  [ 33, 133, 30.0, 1.8],
+  [362, 133, 33.0, 2.5],
+  [129, 358, 35.0, 4.0],
+  [356, 127, 90.0, 12.0],
+];
+const CORNEAL_MM = 8.0;
+const IPD_MM_MEAN = 63.0;
+
+// ── State ─────────────────────────────────────────────────────────────────────
 const S = {
-  running:  false,
-  detector: null,
-  recording: false,
-  recStart:  null,
-  samples:   [],   // {lMm, rMm, scale, asymm} per valid frame
-  statsL:    null,
-  statsR:    null,
-  allRaw:    [],
+  running: false, detector: null,
+  arucoDetector: null,
+  recording: false, recStart: null,
+  samples: [],      // all valid frames during 30s
+  statsL: null, statsR: null,
+  allRaw: [],
+  // live scale source
+  arucoScale: null,   // mm/px from ArUco — exact
+  arucoRoll:  null,   // roll from marker orientation
+  arucoSeen:  false,
 };
 
 const video   = $('video');
 const overlay = $('overlay');
 const octx    = overlay.getContext('2d');
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const toast = msg => {
   const t=$('toast'); t.textContent=msg;
   t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3000);
 };
-const setStatus = (txt, mode='') => {
+const setStatus = (txt,mode='') => {
   $('stxt').textContent=txt;
   $('dot').className='dot'+(mode?' '+mode:'');
 };
-
-// ── canvas sizing ─────────────────────────────────────────────────────────────
 function resizeCanvas(){
   const w=$('camwrap').clientWidth, h=$('camwrap').clientHeight;
-  if(overlay.width!==w||overlay.height!==h){ overlay.width=w; overlay.height=h; }
+  if(overlay.width!==w||overlay.height!==h){overlay.width=w;overlay.height=h;}
 }
-
-// ── coordinate mapping (mirrored video) ───────────────────────────────────────
-function videoPxToCanvas(vx, vy){
-  const W=overlay.width, H=overlay.height;
-  const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  const sc=Math.max(W/vw, H/vh);
-  const offX=(W-vw*sc)/2, offY=(H-vh*sc)/2;
-  return { cx:(vw-vx)*sc+offX, cy:vy*sc+offY };
+function videoPxToCanvas(vx,vy){
+  const W=overlay.width,H=overlay.height;
+  const vw=video.videoWidth||1280,vh=video.videoHeight||720;
+  const sc=Math.max(W/vw,H/vh);
+  const offX=(W-vw*sc)/2,offY=(H-vh*sc)/2;
+  return{cx:(vw-vx)*sc+offX, cy:vy*sc+offY};
 }
 function canvasScale(){
-  const W=overlay.width, H=overlay.height;
+  const W=overlay.width,H=overlay.height;
+  const vw=video.videoWidth||1280,vh=video.videoHeight||720;
+  return Math.max(W/vw,H/vh);
+}
+
+// ── ArUco detection ───────────────────────────────────────────────────────────
+// js-aruco2 expects an imageData from a 2D canvas
+let arucoCtx = null;  // offscreen canvas context for ArUco
+function setupArucoCanvas(){
+  const c = document.createElement('canvas');
+  c.width = 320; c.height = 240; // downscale for speed
+  arucoCtx = c.getContext('2d');
+}
+
+function detectAruco(){
+  if(!S.arucoDetector || !arucoCtx) return null;
   const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  return Math.max(W/vw, H/vh);
+  // Draw downscaled video frame (un-mirrored — ArUco works on raw video)
+  arucoCtx.drawImage(video, 0,0, 320, 240);
+  const imageData = arucoCtx.getImageData(0,0,320,240);
+  let markers;
+  try{ markers = S.arucoDetector.detect(imageData); }
+  catch(e){ return null; }
+  if(!markers || !markers.length) return null;
+
+  // Take first marker (ID 0 preferred, else whatever we see)
+  const m = markers.find(m=>m.id===0) || markers[0];
+  const corners = m.corners; // [{x,y}] in 320×240 space
+
+  // Scale corners back to video pixel space
+  const sx = vw/320, sy = vh/240;
+  const vc = corners.map(c=>({x:c.x*sx, y:c.y*sy}));
+
+  // Side length in video pixels (average all 4 sides)
+  const sidePx = (
+    Math.hypot(vc[1].x-vc[0].x, vc[1].y-vc[0].y)+
+    Math.hypot(vc[2].x-vc[1].x, vc[2].y-vc[1].y)+
+    Math.hypot(vc[3].x-vc[2].x, vc[3].y-vc[2].y)+
+    Math.hypot(vc[0].x-vc[3].x, vc[0].y-vc[3].y)
+  )/4;
+
+  if(sidePx < 8) return null; // too small / bad detection
+
+  const mmPerPx = ARUCO_SIZE_MM / sidePx;
+
+  // Roll from top edge of marker (corners[0]→corners[1])
+  const rollRad = Math.atan2(vc[1].y-vc[0].y, vc[1].x-vc[0].x);
+
+  // Center of marker in video px
+  const cx = vc.reduce((s,c)=>s+c.x,0)/4;
+  const cy = vc.reduce((s,c)=>s+c.y,0)/4;
+
+  return { mmPerPx, rollRad, rollDeg: rollRad*180/Math.PI, corners: vc, cx, cy, sidePx, markerId: m.id };
 }
 
-// ── iris radius in video pixels ───────────────────────────────────────────────
-// MediaPipe refined landmarks: center=468(L)/473(R), 4 edge pts at 469-472/474-477
-// ── iris geometry ─────────────────────────────────────────────────────────────
-// Raw mean radius from 4 edge landmarks around center (video pixels)
-function irisRadiusRaw(kps, ci, es){
-  let s=0;
-  for(let i=es;i<es+4;i++) s+=Math.hypot(kps[i].x-kps[ci].x, kps[i].y-kps[ci].y);
-  return s/4;
-}
-
-// Roll angle of the camera/face from the landmark pair that should be horizontal.
-// We use the line between the two iris centers — in a level frontal face this is
-// perfectly horizontal. Any tilt appears as a non-zero angle here.
-function rollAngle(kps){
-  // iris centers: 468=left, 473=right (in video/face space, pre-mirror)
-  const dx = kps[473].x - kps[468].x;
-  const dy = kps[473].y - kps[468].y;
-  return Math.atan2(dy, dx);  // radians; 0 = level
-}
-
-// Iris radius corrected for camera roll.
-// When the camera is tilted by angle θ, the horizontal span of the iris
-// gets projected onto a rotated axis. We decompose the 4 edge vectors into
-// components along and perpendicular to the tilt axis and take the mean
-// of the corrected radii.
-function irisRadiusCorrected(kps, ci, es, roll){
-  const cosR = Math.cos(roll), sinR = Math.sin(roll);
+// ── Iris geometry ─────────────────────────────────────────────────────────────
+function irisRadiusCorrected(kps,ci,es,roll){
+  const cosR=Math.cos(roll),sinR=Math.sin(roll);
   let s=0;
   for(let i=es;i<es+4;i++){
-    const dx = kps[i].x - kps[ci].x;
-    const dy = kps[i].y - kps[ci].y;
-    // Rotate edge vector back to axis-aligned frame
-    const dx2 =  dx*cosR + dy*sinR;
-    const dy2 = -dx*sinR + dy*cosR;
-    s += Math.hypot(dx2, dy2);
+    const dx=kps[i].x-kps[ci].x, dy=kps[i].y-kps[ci].y;
+    s+=Math.hypot(dx*cosR+dy*sinR, -dx*sinR+dy*cosR);
   }
   return s/4;
 }
-
-// Parallax correction for iris being on a sphere ~8mm proud of the corneal plane.
-// At close range the iris subtends a larger angle than a flat target would.
-// We estimate face depth from the inter-ocular distance in pixels vs known mm:
-//   depth_px ≈ ipd_px * (focalLength / ipd_mm)
-// Then apply:  r_corrected = r_raw / (1 + CORNEAL_DEPTH_MM * mmPerPx * scale)
-// In practice this is a small multiplicative factor.
-const CORNEAL_PROTRUSION_MM = 8.0;  // how far iris plane sits in front of face plane
-
-function parallaxFactor(mmPerPx, ipdPx){
-  // The iris sits ~8mm proud of the nominal face plane (corneal protrusion).
-  // At close range this makes the iris subtend a slightly larger angle than a
-  // flat target at the same nominal depth would, so we slightly over-estimate radius.
-  // We estimate depth from IPD pixels: depth_mm ≈ IPD_MM_MEAN / mmPerPx
-  // where IPD_MM_MEAN = 63mm (average inter-pupillary distance).
-  // Then: correction = CORNEAL_PROTRUSION_MM / depth_mm = CORNEAL_PROTRUSION_MM * mmPerPx / IPD_MM_MEAN
-  // Factor = 1 / (1 + correction)
-  // At 60cm: mmPerPx≈0.105 → correction≈1.3%  → factor≈0.987
-  // At 40cm: mmPerPx≈0.158 → correction≈2.0%  → factor≈0.980
-  // At 30cm: mmPerPx≈0.210 → correction≈2.7%  → factor≈0.974
-  const IPD_MM_MEAN = 63.0;
-  const correction = CORNEAL_PROTRUSION_MM * mmPerPx / IPD_MM_MEAN;
-  return 1 / (1 + correction);
+function rollAngle(kps){
+  return Math.atan2(kps[473].y-kps[468].y, kps[473].x-kps[468].x);
+}
+function parallaxFactor(mmPerPx){
+  return 1/(1+CORNEAL_MM*mmPerPx/IPD_MM_MEAN);
 }
 
-// ── landmark-based scale estimator ───────────────────────────────────────────
-// Weighted least squares: w_i = 1/sigma_i^2
-//
-// Anchor selection rationale:
-//   - Outer canthus (356↔127): large span, good signal, BUT sits near frame edges
-//     where barrel distortion is worst. Inflate sigma to reduce its weight.
-//   - Inner canthus (362↔133): short span but near optical axis, low distortion.
-//   - Eye fissure L/R (263↔362, 33↔133): same depth as iris, very low distortion,
-//     both averaged so per-eye asymmetry cancels. Best anchors.
-//   - Nose alare (129↔358): near optical axis, but high ethnic/sex variance → high sigma.
-//   - Brow width (300↔70): forehead landmarks, stable, near center frame.
-//
-// sigma values tuned so:
-//   fissure pair  weight ≈ 0.25 each  (total 0.50)
-//   inner canthus weight ≈ 0.16
-//   nose alare    weight ≈ 0.06
-//   outer canthus weight ≈ 0.03  (heavily discounted for distortion)
-// Anchor weight rationale (w = 1/sigma^2, normalized):
-//   fissure L+R:    sigma=1.8 → w=0.309 each  → combined 61.8%  ← dominant
-//   inner canthus:  sigma=2.5 → w=0.160        →          16.0%
-//   nose alare:     sigma=4.0 → w=0.063        →           6.3%
-//   outer canthus:  sigma=12  → w=0.007        →           0.7%  (nearly negligible)
-// Outer canthus kept only as a very weak sanity anchor — barrel distortion at
-// frame edges makes it unreliable, especially at close range.
-const ANCHORS = [
-  // [idxA, idxB, meanMm, sigmaMm]
-  [263, 362, 30.0, 1.8],   // left  eye fissure — near optical axis, same depth as iris
-  [ 33, 133, 30.0, 1.8],   // right eye fissure — same
-  [362, 133, 33.0, 2.5],   // inner canthus to inner canthus
-  [129, 358, 35.0, 4.0],   // nose alare — ethnic variance, lower weight
-  [356, 127, 90.0, 12.0],  // outer canthus — barrel distortion risk, nearly ignored
-];
-
-// Pose thresholds — frames outside these are rejected entirely
-const MAX_YAW_ASYMM    = 1.35; // yaw rejection
-const MAX_ROLL_DEG     = 4;    // hard reject above 4° — at 6° error was ~0.3mm
-const SOFT_ROLL_DEG    = 2;    // below this: full weight; above: weight tapers to 0 at MAX
-
-// Distance thresholds based on IPD in pixels.
-// At ~60cm: ipdPx ≈ 100-130.  Too close (<40cm): ipdPx > 150.  Too far (>90cm): ipdPx < 70.
-// Tightened close threshold — barrel distortion grows fast below ~40cm
-const IPD_TOO_CLOSE_PX = 150;
-const IPD_TOO_FAR_PX   = 72;
-
-function estimateScale(kps){
-  // ── Yaw guard ────────────────────────────────────────────────────────────
-  const midX  = (kps[468].x + kps[473].x) / 2;
-  const lDist = Math.abs(midX - kps[356].x);
-  const rDist = Math.abs(midX - kps[127].x);
-  const asymm = Math.max(lDist,rDist) / (Math.min(lDist,rDist) + 0.1);
-  if(asymm > MAX_YAW_ASYMM) return null;
-
-  // ── Roll guard + soft weight ─────────────────────────────────────────────
-  const roll    = rollAngle(kps);
-  const rollDeg = Math.abs(roll * 180 / Math.PI);
-  if(rollDeg > MAX_ROLL_DEG) return null;
-  // Soft taper: full weight below SOFT_ROLL_DEG, linearly tapers to ~0.05 at MAX_ROLL_DEG
-  // This means frames at 3.9° contribute much less than frames at 1° — they're averaged in
-  // but can't dominate the result the way binary accept/reject allows.
-  const rollWeight = rollDeg <= SOFT_ROLL_DEG
-    ? 1.0
-    : Math.max(0.05, 1.0 - (rollDeg - SOFT_ROLL_DEG) / (MAX_ROLL_DEG - SOFT_ROLL_DEG));
-
-  // ── Pitch guard (rough) ──────────────────────────────────────────────────
-  // Nose tip (1) should be below eye midpoint. If it's way off, face is pitched.
-  const eyeMidY = (kps[468].y + kps[473].y) / 2;
-  const ipdPx   = Math.hypot(kps[473].x-kps[468].x, kps[473].y-kps[468].y);
-  const pitchOff= Math.abs(kps[1].y - eyeMidY) / (ipdPx + 0.1);
-  // pitchOff ≈ 0.5–0.9 when frontal; far from that = pitched
-  // We don't reject on this, just store it for the CSV
-
-  // ── Weighted scale ───────────────────────────────────────────────────────
-  let num=0, den=0;
+// ── Landmark scale (fallback) ─────────────────────────────────────────────────
+function estimateLandmarkScale(kps){
+  const midX=(kps[468].x+kps[473].x)/2;
+  const lDist=Math.abs(midX-kps[356].x), rDist=Math.abs(midX-kps[127].x);
+  const asymm=Math.max(lDist,rDist)/(Math.min(lDist,rDist)+0.1);
+  if(asymm>MAX_YAW_ASYMM) return null;
+  const roll=rollAngle(kps), rollDeg=Math.abs(roll*180/Math.PI);
+  if(rollDeg>MAX_ROLL_DEG) return null;
+  const rollWeight=rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(MAX_ROLL_DEG-SOFT_ROLL_DEG));
+  const ipdPx=Math.hypot(kps[473].x-kps[468].x,kps[473].y-kps[468].y);
+  let num=0,den=0;
   for(const [a,b,meanMm,sigmaMm] of ANCHORS){
-    const d = Math.hypot(kps[a].x-kps[b].x, kps[a].y-kps[b].y);
-    if(d < 5) continue;
-    const w = (1/(sigmaMm*sigmaMm)) * rollWeight; // roll-weight all anchors equally
-    num += (meanMm/d) * w;
-    den += w;
+    const d=Math.hypot(kps[a].x-kps[b].x,kps[a].y-kps[b].y);
+    if(d<5)continue;
+    const w=(1/(sigmaMm*sigmaMm))*rollWeight;
+    num+=(meanMm/d)*w; den+=w;
   }
   if(den===0) return null;
-
-  const mmPerPx = num/den;
-  const pFactor = parallaxFactor(mmPerPx, ipdPx);
-
-  // Distance status from IPD pixel size
-  let distStatus = 'ok';
-  if(ipdPx > IPD_TOO_CLOSE_PX) distStatus = 'close';
-  else if(ipdPx < IPD_TOO_FAR_PX) distStatus = 'far';
-
-  return { mmPerPx, roll, rollDeg, rollWeight, asymm, ipdPx, pitchOff, pFactor, distStatus };
+  const mmPerPx=num/den;
+  let distStatus='ok';
+  if(ipdPx>IPD_TOO_CLOSE) distStatus='close';
+  else if(ipdPx<IPD_TOO_FAR) distStatus='far';
+  return{mmPerPx,roll,rollDeg,rollWeight,asymm,ipdPx,distStatus,source:'lm'};
 }
 
-// ── statistics ────────────────────────────────────────────────────────────────
+// ── Frame quality score (lower = better) ─────────────────────────────────────
+// Used to pick best 100 from 30s
+function frameQuality(frame){
+  // Primary: prefer aruco frames. Secondary: roll, then yaw
+  const arucoBonus = frame.scaleSource==='aruco' ? 0 : 5;
+  return arucoBonus + frame.rollDeg + (frame.asymm-1)*10;
+}
+
+// ── Statistics ────────────────────────────────────────────────────────────────
 function computeStats(arr){
-  const n = arr.length;
-  if(n<2) return null;
-  const mean = arr.reduce((a,b)=>a+b,0)/n;
-  const variance = arr.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
-  const se = Math.sqrt(variance/n);
-  const t = n>=120?1.980:n>=60?2.000:n>=30?2.042:n>=20?2.093:n>=10?2.228:2.776;
-  return {mean, ci:t*se, n, se};
+  const n=arr.length; if(n<2)return null;
+  const mean=arr.reduce((a,b)=>a+b,0)/n;
+  const variance=arr.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
+  const se=Math.sqrt(variance/n);
+  const t=n>=120?1.980:n>=60?2.000:n>=30?2.042:n>=20?2.093:n>=10?2.228:2.776;
+  return{mean,ci:t*se,n,se};
+}
+function weightedMean(vals,weights){
+  const wSum=weights.reduce((a,b)=>a+b,0);
+  return vals.reduce((s,v,i)=>s+v*weights[i],0)/wSum;
 }
 
-// ── progress ring ─────────────────────────────────────────────────────────────
+// ── Pose indicator arcs ───────────────────────────────────────────────────────
+// value 0=perfect(green) → 1=bad(red)
+function setPoseArc(id,valId,pindId,t,label){
+  const CIRC_ARC=88; // 2π×14
+  const arc=document.getElementById('arc-'+id);
+  const val=document.getElementById('val-'+id);
+  const pind=document.getElementById('pind-'+id);
+  const offset=CIRC_ARC*(1-Math.min(1,t));
+  arc.style.strokeDashoffset=offset.toFixed(1);
+  const color=t<0.4?'#4af0c8':t<0.75?'#ffb347':'#ff6b9d';
+  arc.style.stroke=color;
+  val.style.color=color;
+  val.textContent=label;
+  pind.style.borderColor=t<0.4?'rgba(74,240,200,.3)':t<0.75?'rgba(255,179,71,.3)':'rgba(255,107,157,.3)';
+}
+function resetPoseArcs(){
+  ['roll','yaw','dist','aruco'].forEach(id=>{
+    document.getElementById('arc-'+id).style.strokeDashoffset='88';
+    document.getElementById('arc-'+id).style.stroke='var(--dim)';
+    document.getElementById('val-'+id).textContent='—';
+    document.getElementById('val-'+id).style.color='var(--dim)';
+    document.getElementById('pind-'+id).style.borderColor='var(--border)';
+  });
+}
+
+// ── Progress ring ─────────────────────────────────────────────────────────────
 function updateRing(elapsed){
-  const pct = Math.min(1, elapsed / (REC_SECS*1000));
-  const remaining = Math.max(0, Math.ceil((REC_SECS*1000 - elapsed)/1000));
-  $('ringFill').style.strokeDashoffset = (CIRC*(1-pct)).toFixed(2);
-  $('ringTime').textContent = remaining;
-  $('ringCounts').textContent = `${S.samples.length} samples`;
+  const pct=Math.min(1,elapsed/(REC_SECS*1000));
+  const rem=Math.max(0,Math.ceil((REC_SECS*1000-elapsed)/1000));
+  $('ringFill').style.strokeDashoffset=(CIRC_RING*(1-pct)).toFixed(2);
+  $('ringTime').textContent=rem;
+  const nBest=Math.min(S.samples.length,BEST_N);
+  $('ringCounts').textContent=`${S.samples.length} frames · best ${nBest}`;
 }
 
-// ── finalize recording ────────────────────────────────────────────────────────
+// ── Draw ArUco overlay ────────────────────────────────────────────────────────
+function drawArucoOverlay(aruco){
+  if(!aruco) return;
+  const sc=canvasScale();
+  const vw=video.videoWidth||1280;
+  // corners are in video px, need canvas px (mirrored)
+  const cc=aruco.corners.map(c=>videoPxToCanvas(c.x,c.y));
+  octx.beginPath();
+  octx.moveTo(cc[0].cx,cc[0].cy);
+  cc.forEach(c=>octx.lineTo(c.cx,c.cy));
+  octx.closePath();
+  octx.strokeStyle='rgba(74,240,200,.8)'; octx.lineWidth=2;
+  octx.stroke();
+  // corner dots
+  cc.forEach((c,i)=>{
+    octx.beginPath(); octx.arc(c.cx,c.cy,3,0,Math.PI*2);
+    octx.fillStyle=i===0?'#4af0c8':'rgba(74,240,200,.5)'; octx.fill();
+  });
+  // label
+  const ctr=videoPxToCanvas(aruco.cx,aruco.cy);
+  octx.fillStyle='rgba(74,240,200,.9)'; octx.font='bold 10px Space Mono,monospace';
+  octx.textAlign='center'; octx.textBaseline='middle';
+  octx.fillText(`${aruco.mmPerPx.toFixed(4)}mm/px`,ctr.cx,ctr.cy);
+}
+
+// ── Finalize ──────────────────────────────────────────────────────────────────
 function finalize(){
   S.recording=false; S.recStart=null;
   $('recRing').style.display='none';
 
-  // Weighted mean: frames with less roll contribute more
-  // Use rollWeight as the per-frame weight for the mean, but still
-  // compute unweighted variance over all accepted samples for the CI
-  // (conservative — doesn't assume weighted samples are independent)
-  const weightedMean = (vals, weights) => {
-    const wSum = weights.reduce((a,b)=>a+b,0);
-    return vals.reduce((s,v,i)=>s+v*weights[i],0) / wSum;
+  if(S.samples.length<5){toast('Too few valid frames — try again');setStatus('READY','on');return;}
+
+  // Sort by quality, take best BEST_N
+  const sorted=[...S.samples].sort((a,b)=>frameQuality(a)-frameQuality(b));
+  const best=sorted.slice(0,Math.min(BEST_N,sorted.length));
+
+  const weights=best.map(f=>f.rollWeight||1);
+  const lVals=best.map(f=>f.lMm), rVals=best.map(f=>f.rMm);
+  const lMean=weightedMean(lVals,weights), rMean=weightedMean(rVals,weights);
+
+  const statsFn=(vals,mean)=>{
+    const n=vals.length; if(n<2)return null;
+    const variance=vals.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
+    const se=Math.sqrt(variance/n);
+    const t=n>=120?1.980:n>=60?2.000:n>=30?2.042:n>=20?2.093:n>=10?2.228:2.776;
+    return{mean,ci:t*se,n,se};
   };
-  const weights = S.samples.map(s=>s.rollWeight);
-  const lVals   = S.samples.map(s=>s.lMm);
-  const rVals   = S.samples.map(s=>s.rMm);
-  const lMean   = weightedMean(lVals, weights);
-  const rMean   = weightedMean(rVals, weights);
-  // Compute stats using unweighted variance around the weighted mean
-  const statsFromWeightedMean = (vals, mean) => {
-    const n = vals.length;
-    if(n<2) return null;
-    const variance = vals.reduce((s,v)=>s+(v-mean)**2,0)/(n-1);
-    const se = Math.sqrt(variance/n);
-    const t = n>=120?1.980:n>=60?2.000:n>=30?2.042:n>=20?2.093:n>=10?2.228:2.776;
-    return {mean, ci:t*se, n, se};
-  };
-  S.statsL = statsFromWeightedMean(lVals, lMean);
-  S.statsR = statsFromWeightedMean(rVals, rMean);
+  S.statsL=statsFn(lVals,lMean);
+  S.statsR=statsFn(rVals,rMean);
 
-  if(!S.statsL && !S.statsR){
-    toast('Too few valid frames — try again');
-    setStatus('READY','on');
-    return;
-  }
+  const arucoFrames=best.filter(f=>f.scaleSource==='aruco').length;
+  const scaleNote=arucoFrames>0?`<span>ArUco ${arucoFrames}/${best.length} frames</span>`:'<span class="warn">landmark scale only</span>';
 
-  const fmt  = st => st ? st.mean.toFixed(2) : '—';
-  const ci   = st => st ? `95% CI ±${st.ci.toFixed(2)}mm  n=${st.n}` : '';
+  const fmt=st=>st?st.mean.toFixed(2):'—';
+  const ci=st=>st?`95% CI ±${st.ci.toFixed(2)}mm  n=${st.n}`:'';
+  $('valL').textContent=fmt(S.statsL); $('valL').className=S.statsL?'rval':'rval pending';
+  $('valR').textContent=fmt(S.statsR); $('valR').className=S.statsR?'rval':'rval pending';
+  $('unitL').textContent=S.statsL?'mm  ✓ best-'+best.length:'not measured';
+  $('unitR').textContent=S.statsR?'mm  ✓ best-'+best.length:'not measured';
+  $('ciL').innerHTML=S.statsL?`<span>${ci(S.statsL)}</span>`:'';
+  $('ciR').innerHTML=S.statsR?`<span>${ci(S.statsR)}</span>`:'';
 
-  $('valL').textContent = fmt(S.statsL); $('valL').className = S.statsL ? 'rval' : 'rval pending';
-  $('valR').textContent = fmt(S.statsR); $('valR').className = S.statsR ? 'rval' : 'rval pending';
-  $('unitL').textContent = S.statsL ? 'mm  ✓ averaged' : 'not measured';
-  $('unitR').textContent = S.statsR ? 'mm  ✓ averaged' : 'not measured';
-  $('ciL').innerHTML = S.statsL ? `<span>${ci(S.statsL)}</span>` : '';
-  $('ciR').innerHTML = S.statsR ? `<span>${ci(S.statsR)}</span>` : '';
-
-  if(S.statsL && S.statsR){
-    const diff   = Math.abs(S.statsL.mean - S.statsR.mean);
-    const larger = S.statsL.mean >= S.statsR.mean ? 'LEFT' : 'RIGHT';
-    // Roll quality summary
-    const rollVals = S.samples.map(s=>s.roll);
-    const meanRoll = rollVals.reduce((a,b)=>a+b,0)/rollVals.length;
-    const maxRoll  = Math.max(...rollVals);
-    const rollNote = maxRoll > 3 ? ` <span class="warn"> max roll ${maxRoll.toFixed(1)}°</span>` : '';
-    $('instr').innerHTML =
-      `<span>${larger}</span> larger by <span>${diff.toFixed(2)}mm</span>`+
-      ` &nbsp;·&nbsp; L:${S.statsL.mean.toFixed(2)} R:${S.statsR.mean.toFixed(2)}mm`+
-      rollNote;
+  if(S.statsL&&S.statsR){
+    const diff=Math.abs(S.statsL.mean-S.statsR.mean);
+    const larger=S.statsL.mean>=S.statsR.mean?'LEFT':'RIGHT';
+    $('instr').innerHTML=`<span>${larger}</span> larger by <span>${diff.toFixed(2)}mm</span>`+
+      ` · L:${S.statsL.mean.toFixed(2)} R:${S.statsR.mean.toFixed(2)}mm &nbsp;${scaleNote}`;
   }
 
   setStatus('DONE','on');
-  $('exportBtn').disabled = false;
-  $('actionRow').style.display = 'flex';
-  $('recRow').style.display = 'none';
-  $('poseBadge').className = 'hidden';
-  toast(`Done — ${S.samples.length} frames averaged`);
+  $('exportBtn').disabled=false;
+  $('actionRow').style.display='flex';
+  $('recRow').style.display='none';
+  toast(`Done — best ${best.length} of ${S.samples.length} frames`);
 }
 
-// ── render loop ───────────────────────────────────────────────────────────────
+// ── Main render loop ──────────────────────────────────────────────────────────
 async function loop(){
-  if(!S.running){ requestAnimationFrame(loop); return; }
-  if(video.readyState<2){ requestAnimationFrame(loop); return; }
+  if(!S.running){requestAnimationFrame(loop);return;}
+  if(video.readyState<2){requestAnimationFrame(loop);return;}
 
   resizeCanvas();
   octx.clearRect(0,0,overlay.width,overlay.height);
 
   try{
-    const faces = await S.detector.estimateFaces(video, {flipHorizontal:false});
+    // ── ArUco detection (every frame, fast) ──────────────────────────────
+    const aruco=detectAruco();
+    if(aruco){
+      S.arucoScale=aruco.mmPerPx;
+      S.arucoRoll=aruco.rollRad;
+      S.arucoSeen=true;
+      $('arucoHint').style.display='none';
+      $('scaleBadge').className='aruco';
+      $('scaleBadge').textContent=`▲ ${aruco.mmPerPx.toFixed(4)}mm/px`;
+    } else {
+      if(!S.arucoSeen){
+        $('arucoHint').style.display='';
+        $('scaleBadge').className='none';
+        $('scaleBadge').textContent='NO ARUCO';
+      }
+    }
+    drawArucoOverlay(aruco);
+
+    // ── Face landmark detection ───────────────────────────────────────────
+    const faces=await S.detector.estimateFaces(video,{flipHorizontal:false});
 
     if(faces.length){
-      let kps = faces[0].keypoints;
+      let kps=faces[0].keypoints;
       const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-      // Normalize to video pixels if landmarks are 0-1
-      if(Math.max(...kps.slice(0,10).map(p=>p.x)) < 2)
-        kps = kps.map(p=>({x:p.x*vw, y:p.y*vh}));
+      if(Math.max(...kps.slice(0,10).map(p=>p.x))<2)
+        kps=kps.map(p=>({x:p.x*vw,y:p.y*vh}));
 
-      if(kps.length >= 478){
-        const sc      = canvasScale();
-        const lmScale = estimateScale(kps);
-        const frontal = !!lmScale;
+      if(kps.length>=478){
+        const sc=canvasScale();
 
-        // Roll-corrected iris radii (video pixels)
-        const roll      = lmScale ? lmScale.roll : 0;
-        const lRadVid   = irisRadiusCorrected(kps, 468, 469, roll);
-        const rRadVid   = irisRadiusCorrected(kps, 473, 474, roll);
+        // ── Determine scale source ────────────────────────────────────────
+        // ArUco preferred; landmark fallback
+        const lmScale=estimateLandmarkScale(kps);
+        let activeScale, rollForIris, rollDeg, rollWeight, asymm, distStatus, ipdPx, scaleSource;
 
-        // Apply scale + parallax correction
-        const pf        = lmScale ? lmScale.pFactor : 1;
-        const lMm = lmScale ? lRadVid * 2 * lmScale.mmPerPx * pf : null;
-        const rMm = lmScale ? rRadVid * 2 * lmScale.mmPerPx * pf : null;
-
-        // ── pose badge ────────────────────────────────────────────────────
-        const badge = $('poseBadge');
-        badge.className = 'hidden';
-        if(!lmScale){
-          badge.className = 'bad';
-          const rollRaw = rollAngle(kps) * 180 / Math.PI;
-          const midX2   = (kps[468].x + kps[473].x) / 2;
-          const ld = Math.abs(midX2 - kps[356].x), rd = Math.abs(midX2 - kps[127].x);
-          const as = Math.max(ld,rd)/(Math.min(ld,rd)+0.1);
-          if(Math.abs(rollRaw) > MAX_ROLL_DEG)
-            badge.textContent = `⚠ TILT ${rollRaw.toFixed(1)}° — level the camera`;
-          else
-            badge.textContent = `⚠ TURN — face the camera straight`;
+        if(aruco){
+          // ArUco gives us exact scale and roll
+          activeScale  = aruco.mmPerPx;
+          rollForIris  = aruco.rollRad;
+          rollDeg      = Math.abs(aruco.rollDeg);
+          rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(MAX_ROLL_DEG-SOFT_ROLL_DEG));
+          // Still use landmark yaw/dist metrics
+          asymm        = lmScale ? lmScale.asymm : 1.0;
+          distStatus   = lmScale ? lmScale.distStatus : 'ok';
+          ipdPx        = lmScale ? lmScale.ipdPx : 100;
+          scaleSource  = 'aruco';
+          $('scaleBadge').className='aruco';
+        } else if(lmScale){
+          activeScale  = lmScale.mmPerPx;
+          rollForIris  = lmScale.roll;
+          rollDeg      = lmScale.rollDeg;
+          rollWeight   = lmScale.rollWeight;
+          asymm        = lmScale.asymm;
+          distStatus   = lmScale.distStatus;
+          ipdPx        = lmScale.ipdPx;
+          scaleSource  = 'lm';
+          $('scaleBadge').className='lm';
+          $('scaleBadge').textContent=`LM ${lmScale.mmPerPx.toFixed(4)}mm/px`;
         } else {
-          const ds = lmScale.distStatus;
-          if(ds === 'close'){
-            badge.className = 'bad';
-            badge.textContent = `⚠ TOO CLOSE — move back  (ipd:${lmScale.ipdPx.toFixed(0)}px)`;
-          } else if(ds === 'far'){
-            badge.className = 'warn';
-            badge.textContent = `↔ MOVE CLOSER  (ipd:${lmScale.ipdPx.toFixed(0)}px)`;
-          } else {
-            badge.className = 'ok';
-            const rollSign = lmScale.roll >= 0 ? '+' : '';
-            badge.textContent = `✓ GOOD  roll:${rollSign}${lmScale.rollDeg.toFixed(1)}° (w:${lmScale.rollWeight.toFixed(2)})  ipd:${lmScale.ipdPx.toFixed(0)}px`;
-          }
+          // No valid scale — show rejection reason
+          activeScale=null;
+          rollDeg=Math.abs(rollAngle(kps)*180/Math.PI);
+          asymm=null; distStatus='unknown'; rollWeight=0;
+          scaleSource=null;
         }
 
-        // ── debug ─────────────────────────────────────────────────────────
-        $('debugPanel').style.display = '';
-        $('dbg1').textContent = `video:${vw}×${vh}  sc:${sc.toFixed(4)}  samples:${S.samples.length}`;
-        $('dbg2').textContent = lmScale
-          ? `scale:${lmScale.mmPerPx.toFixed(5)}mm/px  parallax:${((1-pf)*100).toFixed(2)}%  ipd:${lmScale.ipdPx.toFixed(1)}px`
-          : 'scale: — not frontal';
-        $('dbg3').textContent = lmScale
-          ? `roll:${lmScale.rollDeg.toFixed(1)}°  yaw:${lmScale.asymm.toFixed(2)}  dist:${lmScale.distStatus}`
-          : `pose rejected  roll:${(rollAngle(kps)*180/Math.PI).toFixed(1)}°`;
-        $('dbg4').textContent = `L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm  lRad:${lRadVid.toFixed(2)}px rRad:${rRadVid.toFixed(2)}px`;
+        // ── Iris measurements ─────────────────────────────────────────────
+        const roll=rollForIris||0;
+        const lRadVid=irisRadiusCorrected(kps,468,469,roll);
+        const rRadVid=irisRadiusCorrected(kps,473,474,roll);
+        const pf=activeScale?parallaxFactor(activeScale):1;
+        const lMm=activeScale?lRadVid*2*activeScale*pf:null;
+        const rMm=activeScale?rRadVid*2*activeScale*pf:null;
 
-        // ── draw iris circles ─────────────────────────────────────────────
-        [[468, '#7b8fff', lRadVid*sc, lMm, 'L'],
-         [473, '#ff6b9d', rRadVid*sc, rMm, 'R']]
-        .forEach(([ci, col, radCss, mm, side])=>{
-          const {cx,cy} = videoPxToCanvas(kps[ci].x, kps[ci].y);
-          octx.beginPath(); octx.arc(cx, cy, radCss, 0, Math.PI*2);
-          octx.strokeStyle = col;
-          octx.lineWidth   = S.recording ? 2.5 : 1.5;
-          octx.globalAlpha = S.recording ? 1.0 : 0.55;
-          octx.stroke();
-          octx.globalAlpha = 1;
-          // center dot
-          octx.beginPath(); octx.arc(cx, cy, 3, 0, Math.PI*2);
-          octx.fillStyle = col; octx.fill();
-          // label
+        // ── Pose indicator arcs ───────────────────────────────────────────
+        // Roll: 0°=perfect, 4°=limit
+        const rollT=Math.min(1,rollDeg/MAX_ROLL_DEG);
+        setPoseArc('roll','val-roll','pind-roll',rollT,rollDeg.toFixed(1)+'°');
+
+        // Yaw: asymm 1.0=perfect, 1.35=limit
+        const yawT=asymm?Math.min(1,(asymm-1.0)/(MAX_YAW_ASYMM-1.0)):1;
+        setPoseArc('yaw','val-yaw','pind-yaw',yawT,asymm?asymm.toFixed(2):'—');
+
+        // Distance: optimal center is IPD~110px, 0=too far, 1=too close
+        const distT=ipdPx?
+          (ipdPx>IPD_TOO_CLOSE?1:ipdPx<IPD_TOO_FAR?0.8:Math.abs(ipdPx-110)/60):0.5;
+        setPoseArc('dist','val-dist','pind-dist',distT,ipdPx?ipdPx.toFixed(0)+'px':'—');
+
+        // ArUco: 0=locked, 1=missing
+        const arucoT=aruco?0:1;
+        setPoseArc('aruco','val-aruco','pind-aruco',arucoT,aruco?'✓':'—');
+
+        // ── Draw iris circles ─────────────────────────────────────────────
+        [[468,'#7b8fff',lRadVid*sc,lMm,'L'],[473,'#ff6b9d',rRadVid*sc,rMm,'R']]
+        .forEach(([ci,col,radCss,mm,side])=>{
+          const {cx,cy}=videoPxToCanvas(kps[ci].x,kps[ci].y);
+          // Outer ring: color by quality
+          const qualColor=activeScale?(rollT<0.5&&yawT<0.5?col:'rgba(255,179,71,.7)'):'rgba(100,100,140,.5)';
+          octx.beginPath(); octx.arc(cx,cy,radCss,0,Math.PI*2);
+          octx.strokeStyle=qualColor;
+          octx.lineWidth=S.recording?2.5:1.5;
+          octx.globalAlpha=S.recording?1:0.6;
+          octx.stroke(); octx.globalAlpha=1;
+          // Center dot
+          octx.beginPath(); octx.arc(cx,cy,3,0,Math.PI*2);
+          octx.fillStyle=col; octx.fill();
           if(mm){
-            octx.fillStyle    = col;
-            octx.font         = 'bold 11px Space Mono,monospace';
-            octx.textAlign    = 'center';
-            octx.textBaseline = 'bottom';
-            octx.fillText(`${side} ${mm.toFixed(2)}mm`, cx, cy-radCss-4);
+            octx.fillStyle=qualColor;
+            octx.font='bold 11px Space Mono,monospace';
+            octx.textAlign='center'; octx.textBaseline='bottom';
+            const src=scaleSource==='aruco'?'▲':'~';
+            octx.fillText(`${side} ${src}${mm.toFixed(2)}mm`,cx,cy-radCss-4);
           }
         });
 
-        // ── live card update (pre-record) ─────────────────────────────────
-        if(!S.statsL && lMm){
-          $('valL').textContent = lMm.toFixed(2); $('valL').className = 'rval';
-          $('unitL').textContent = 'mm  live';
-        }
-        if(!S.statsR && rMm){
-          $('valR').textContent = rMm.toFixed(2); $('valR').className = 'rval';
-          $('unitR').textContent = 'mm  live';
-        }
+        // ── Four corner target guides on video ────────────────────────────
+        // Draw subtle corner brackets in the camera view to guide framing
+        drawCornerGuides(rollT,yawT,distT,arucoT);
 
-        // ── record ────────────────────────────────────────────────────────
+        // ── Live card update ──────────────────────────────────────────────
+        if(!S.statsL&&lMm){$('valL').textContent=lMm.toFixed(2);$('valL').className='rval';$('unitL').textContent='mm  live';}
+        if(!S.statsR&&rMm){$('valR').textContent=rMm.toFixed(2);$('valR').className='rval';$('unitR').textContent='mm  live';}
+
+        // ── Debug ─────────────────────────────────────────────────────────
+        $('debugPanel').style.display='';
+        $('dbg1').textContent=`video:${vw}×${vh}  sc:${sc.toFixed(4)}  src:${scaleSource||'none'}`;
+        $('dbg2').textContent=`scale:${activeScale?activeScale.toFixed(5):'—'}  pf:${((1-pf)*100).toFixed(2)}%`;
+        $('dbg3').textContent=`roll:${rollDeg.toFixed(1)}°  yaw:${asymm?asymm.toFixed(3):'—'}  dist:${distStatus}  ipd:${ipdPx?ipdPx.toFixed(0):'—'}px`;
+        $('dbg4').textContent=`L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm`;
+        $('dbg5').textContent=`samples:${S.samples.length}  aruco_frames:${S.samples.filter(f=>f.scaleSource==='aruco').length}`;
+
+        // ── Record ────────────────────────────────────────────────────────
+        const poseOk = rollDeg<=MAX_ROLL_DEG && distStatus==='ok' && activeScale;
         if(S.recording && S.recStart){
-          const elapsed = Date.now() - S.recStart;
+          const elapsed=Date.now()-S.recStart;
           updateRing(elapsed);
-          // Accept frame only if pose is good AND distance is ok
-          // Distance errors are systematic — averaging doesn't fix them
-          if(lMm && rMm && lmScale.distStatus === 'ok'){
-            const frame = {
-              lMm, rMm,
-              scale:      lmScale.mmPerPx,
-              asymm:      lmScale.asymm,
-              roll:       lmScale.rollDeg,
-              rollWeight: lmScale.rollWeight,
-              pitch:      lmScale.pitchOff,
-              pFactor:    lmScale.pFactor,
-            };
-            S.samples.push(frame);
-            S.allRaw.push({t:Date.now(), ...frame});
+          if(lMm&&rMm&&poseOk){
+            S.samples.push({lMm,rMm,scale:activeScale,scaleSource,
+              rollDeg,rollWeight,asymm:asymm||1,pFactor:pf});
+            S.allRaw.push({t:Date.now(),lMm,rMm,scale:activeScale,scaleSource,
+              rollDeg,rollWeight,asymm:asymm||1,pFactor:pf});
           }
-          if(elapsed >= REC_SECS*1000){
-            S.recording = false;
-            finalize();
-          }
+          if(elapsed>=REC_SECS*1000){S.recording=false;finalize();}
         }
 
-        // Enable record button only when frontal AND distance is ok
-        const distOk = lmScale && lmScale.distStatus === 'ok';
-        $('recBtn').disabled = !frontal || !distOk;
-        setStatus(S.recording ? 'RECORDING' : 'TRACKING', S.recording ? 'rec' : 'on');
-
+        // Record button: enable if pose is acceptable
+        $('recBtn').disabled=!poseOk;
+        setStatus(S.recording?'RECORDING':'TRACKING',S.recording?'rec':'on');
       }
     } else {
       setStatus('NO FACE','warn');
-      $('recBtn').disabled = true;
+      $('recBtn').disabled=true;
+      resetPoseArcs();
     }
-  } catch(e){ console.warn('[IrisMeasure] loop error:', e); }
-
+  } catch(e){console.warn('[ThirdIris] loop error:',e);}
   requestAnimationFrame(loop);
 }
 
-// ── start button ──────────────────────────────────────────────────────────────
-$('startBtn').onclick = async () => {
+// ── Corner guides ─────────────────────────────────────────────────────────────
+// Four L-shaped brackets in canvas corners — color encodes overall pose quality
+function drawCornerGuides(rollT,yawT,distT,arucoT){
+  const W=overlay.width, H=overlay.height;
+  const overall=Math.max(rollT,yawT,distT*0.5); // arucoT is advisory not blocking
+  const color=overall<0.4?'rgba(74,240,200,.5)':overall<0.75?'rgba(255,179,71,.5)':'rgba(255,107,157,.4)';
+  const L=Math.min(W,H)*0.08;  // bracket arm length
+  const M=Math.min(W,H)*0.04;  // margin from edge
+  const lw=2;
+
+  octx.strokeStyle=color; octx.lineWidth=lw;
+
+  // Top-left
+  octx.beginPath(); octx.moveTo(M,M+L); octx.lineTo(M,M); octx.lineTo(M+L,M); octx.stroke();
+  // Top-right
+  octx.beginPath(); octx.moveTo(W-M-L,M); octx.lineTo(W-M,M); octx.lineTo(W-M,M+L); octx.stroke();
+  // Bottom-left
+  octx.beginPath(); octx.moveTo(M,H-M-L); octx.lineTo(M,H-M); octx.lineTo(M+L,H-M); octx.stroke();
+  // Bottom-right
+  octx.beginPath(); octx.moveTo(W-M-L,H-M); octx.lineTo(W-M,H-M); octx.lineTo(W-M,H-M-L); octx.stroke();
+
+  // Center crosshair (very subtle)
+  const cx=W/2, cy=H/2, cl=L*0.4;
+  octx.strokeStyle=color.replace('.5',',.2').replace('.4','.15');
+  octx.beginPath(); octx.moveTo(cx-cl,cy); octx.lineTo(cx+cl,cy);
+  octx.moveTo(cx,cy-cl); octx.lineTo(cx,cy+cl); octx.stroke();
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+$('startBtn').onclick=async()=>{
   $('startBtn').disabled=true; $('startBtn').textContent='Starting…';
   setStatus('CAMERA…','warn');
-  try{ await startCamera(); }
-  catch(e){
-    toast('Camera denied — check permissions');
-    $('startBtn').disabled=false; $('startBtn').textContent='▶ START'; return;
-  }
+  try{await startCamera();}
+  catch(e){toast('Camera denied');$('startBtn').disabled=false;$('startBtn').textContent='▶ START';return;}
   setStatus('LOADING…','warn'); $('startBtn').textContent='Loading model…';
-  try{ await loadModel(); }
+  try{await loadModel();}
   catch(e){
     toast('Model error: '+(e.message||e));
     setStatus('ERROR','warn');
-    $('startBtn').disabled=false; $('startBtn').textContent='▶ RETRY'; return;
+    $('startBtn').disabled=false;$('startBtn').textContent='▶ RETRY';return;
   }
   S.running=true;
   $('startRow').style.display='none';
   $('recRow').style.display='flex';
   resizeCanvas();
   requestAnimationFrame(loop);
-  $('instr').innerHTML=`Look straight at camera — record button enables when both irises are detected.`;
+  $('instr').innerHTML=`<span>Third Eye active.</span> Look straight at camera. ArUco on forehead = exact scale.`;
   setStatus('READY','on');
 };
 
-// ── camera + model ────────────────────────────────────────────────────────────
 async function startCamera(){
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video:{facingMode:'user', width:{ideal:1280}, height:{ideal:720}}
-  });
-  video.srcObject = stream;
+  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
+  video.srcObject=stream;
   return new Promise(res=>{
-    video.onloadedmetadata = ()=>{
-      video.play();
-      const wait=()=>{ video.videoWidth>0 ? res() : requestAnimationFrame(wait); };
-      wait();
-    };
+    video.onloadedmetadata=()=>{video.play();const w=()=>{video.videoWidth>0?res():requestAnimationFrame(w)};w();};
   });
 }
+
 async function loadModel(){
-  S.detector = await faceLandmarksDetection.createDetector(
+  // ArUco detector
+  setupArucoCanvas();
+  if(window.AR && window.AR.Detector){
+    S.arucoDetector=new AR.Detector();
+  } else {
+    console.warn('[ThirdIris] js-aruco2 not loaded — ArUco disabled');
+  }
+  // Face landmarks
+  S.detector=await faceLandmarksDetection.createDetector(
     faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-    { runtime:'mediapipe',
-      solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619',
-      refineLandmarks:true, maxFaces:1 }
+    {runtime:'mediapipe',solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619',
+     refineLandmarks:true,maxFaces:1}
   );
 }
 
-// ── record button ─────────────────────────────────────────────────────────────
-$('recBtn').onclick = ()=>{
-  if(S.recording) return;
-  // reset state
-  S.samples=[]; S.statsL=null; S.statsR=null;
-  $('exportBtn').disabled=true;
-  $('actionRow').style.display='none';
-  ['valL','valR'].forEach(id=>{ $(id).textContent='—'; $(id).className='rval pending'; });
-  $('unitL').textContent='recording…'; $('unitR').textContent='recording…';
-  $('ciL').innerHTML=''; $('ciR').innerHTML='';
-  // start
-  S.recording=true; S.recStart=Date.now();
+$('recBtn').onclick=()=>{
+  if(S.recording)return;
+  S.samples=[];S.statsL=null;S.statsR=null;
+  $('exportBtn').disabled=true;$('actionRow').style.display='none';
+  ['valL','valR'].forEach(id=>{$(id).textContent='—';$(id).className='rval pending';});
+  $('unitL').textContent='recording…';$('unitR').textContent='recording…';
+  $('ciL').innerHTML='';$('ciR').innerHTML='';
+  S.recording=true;S.recStart=Date.now();
   $('recRing').style.display='flex';
-  $('ringFill').style.strokeDashoffset=CIRC;
+  $('ringFill').style.strokeDashoffset=CIRC_RING;
   $('ringTime').textContent=REC_SECS;
-  $('ringCounts').textContent='0 samples';
-  $('instr').innerHTML=`Hold still — look straight ahead. <span class="warn">Frames where face turns are discarded automatically.</span>`;
-  toast('Recording — 30s, hold still…');
+  $('ringCounts').textContent='0 frames';
+  $('instr').innerHTML=`Hold still. <span class="warn">Bad-pose frames auto-discarded.</span> Best ${BEST_N} of 30s kept.`;
+  toast(`Recording 30s — keep still, ArUco on forehead…`);
 };
 
-// ── retry button ──────────────────────────────────────────────────────────────
-$('retryBtn').onclick = ()=>{
-  S.samples=[]; S.statsL=null; S.statsR=null; S.allRaw=[];
-  S.recording=false; S.recStart=null;
-  ['valL','valR'].forEach(id=>{ $(id).textContent='—'; $(id).className='rval pending'; });
-  $('unitL').textContent='not measured'; $('unitR').textContent='not measured';
-  $('ciL').innerHTML=''; $('ciR').innerHTML='';
-  $('exportBtn').disabled=true;
-  $('actionRow').style.display='none';
-  $('recRow').style.display='flex';
-  $('recRing').style.display='none';
-  $('instr').innerHTML=`Look straight at camera — record button enables when both irises are detected.`;
-  setStatus('READY','on');
-  toast('Cleared — ready to record again');
+$('retryBtn').onclick=()=>{
+  S.samples=[];S.statsL=null;S.statsR=null;S.allRaw=[];
+  S.recording=false;S.recStart=null;
+  ['valL','valR'].forEach(id=>{$(id).textContent='—';$(id).className='rval pending';});
+  $('unitL').textContent='not measured';$('unitR').textContent='not measured';
+  $('ciL').innerHTML='';$('ciR').innerHTML='';
+  $('exportBtn').disabled=true;$('actionRow').style.display='none';
+  $('recRow').style.display='flex';$('recRing').style.display='none';
+  $('instr').innerHTML=`<span>Third Eye active.</span> Look straight at camera.`;
+  setStatus('READY','on');toast('Cleared');
 };
 
-// ── CSV export ────────────────────────────────────────────────────────────────
-$('exportBtn').onclick = ()=>{
-  const ts = new Date().toISOString().replace(/[:.]/g,'-');
-  const rows = ['timestamp_ms,left_mm,right_mm,scale_mm_per_px,asymm,roll_deg,roll_weight,pitch_off,parallax_pct'];
+$('exportBtn').onclick=()=>{
+  const ts=new Date().toISOString().replace(/[:.]/g,'-');
+  const rows=['timestamp_ms,left_mm,right_mm,scale_mm_per_px,scale_source,roll_deg,roll_weight,asymm,parallax_pct'];
   S.allRaw.forEach(r=>{
-    rows.push(`${r.t},${r.lMm.toFixed(4)},${r.rMm.toFixed(4)},${r.scale.toFixed(6)},${r.asymm.toFixed(3)},${r.roll.toFixed(2)},${(r.rollWeight||1).toFixed(3)},${r.pitch.toFixed(3)},${((1-r.pFactor)*100).toFixed(2)}`);
+    rows.push(`${r.t},${r.lMm.toFixed(4)},${r.rMm.toFixed(4)},${r.scale.toFixed(6)},${r.scaleSource},${r.rollDeg.toFixed(2)},${(r.rollWeight||1).toFixed(3)},${(r.asymm||1).toFixed(3)},${((1-r.pFactor)*100).toFixed(2)}`);
   });
-  rows.push('');
-  rows.push('# SUMMARY');
-  rows.push('side,mean_mm,ci95_mm,n,se_mm');
-  if(S.statsL) rows.push(`L,${S.statsL.mean.toFixed(4)},${S.statsL.ci.toFixed(4)},${S.statsL.n},${S.statsL.se.toFixed(4)}`);
-  if(S.statsR) rows.push(`R,${S.statsR.mean.toFixed(4)},${S.statsR.ci.toFixed(4)},${S.statsR.n},${S.statsR.se.toFixed(4)}`);
+  rows.push('','# SUMMARY','side,mean_mm,ci95_mm,n,se_mm,scale_source');
+  const arucoFrac=S.allRaw.filter(r=>r.scaleSource==='aruco').length/Math.max(1,S.allRaw.length);
+  if(S.statsL) rows.push(`L,${S.statsL.mean.toFixed(4)},${S.statsL.ci.toFixed(4)},${S.statsL.n},${S.statsL.se.toFixed(4)},${arucoFrac>0.5?'aruco':'lm'}`);
+  if(S.statsR) rows.push(`R,${S.statsR.mean.toFixed(4)},${S.statsR.ci.toFixed(4)},${S.statsR.n},${S.statsR.se.toFixed(4)},${arucoFrac>0.5?'aruco':'lm'}`);
   if(S.statsL&&S.statsR) rows.push(`delta,${Math.abs(S.statsL.mean-S.statsR.mean).toFixed(4)},,,`);
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob); a.download=`iris_${ts}.csv`; a.click();
+  a.href=URL.createObjectURL(blob);a.download=`thirdiris_${ts}.csv`;a.click();
   toast('CSV exported');
 };
 
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize',resizeCanvas);
 resizeCanvas();
 </script>
 </body>
