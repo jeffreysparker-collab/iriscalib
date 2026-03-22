@@ -452,8 +452,20 @@ function irisRadiusCorrected(kps,ci,es,roll){
   }
   return s/4;
 }
-function rollAngle(kps){
-  return Math.atan2(kps[473].y-kps[468].y, kps[473].x-kps[468].x);
+function adaptiveRollMax(ipdPx){
+  // Loosen roll threshold at close distances (large ipdPx) to compensate
+  // for perspective distortion. Clamps between MAX_ROLL_DEG and 7°.
+  if(!ipdPx) return MAX_ROLL_DEG;
+  return Math.min(7, MAX_ROLL_DEG + Math.max(0, (ipdPx - IPD_TOO_FAR) / 30));
+}
+
+
+  // Use multiple stable reference pairs and average for robustness.
+  // Outer eye corners (33→263) are more stable than iris centers at close range.
+  const r1 = Math.atan2(kps[263].y-kps[33].y,  kps[263].x-kps[33].x);
+  const r2 = Math.atan2(kps[473].y-kps[468].y,  kps[473].x-kps[468].x);
+  // Weighted average: outer corners get more weight (less affected by vergence)
+  return (r1*2 + r2) / 3;
 }
 function parallaxFactor(mmPerPx){
   return 1/(1+CORNEAL_MM*mmPerPx/IPD_MM_MEAN);
@@ -465,10 +477,11 @@ function estimateLandmarkScale(kps){
   const lDist=Math.abs(midX-kps[356].x), rDist=Math.abs(midX-kps[127].x);
   const asymm=Math.max(lDist,rDist)/(Math.min(lDist,rDist)+0.1);
   if(asymm>MAX_YAW_ASYMM) return null;
-  const roll=rollAngle(kps), rollDeg=Math.abs(roll*180/Math.PI);
-  if(rollDeg>MAX_ROLL_DEG) return null;
-  const rollWeight=rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(MAX_ROLL_DEG-SOFT_ROLL_DEG));
   const ipdPx=Math.hypot(kps[473].x-kps[468].x,kps[473].y-kps[468].y);
+  const roll=rollAngle(kps), rollDeg=Math.abs(roll*180/Math.PI);
+  const maxRoll=adaptiveRollMax(ipdPx);
+  if(rollDeg>maxRoll) return null;
+  const rollWeight=rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(maxRoll-SOFT_ROLL_DEG));
   let num=0,den=0;
   for(const [a,b,meanMm,sigmaMm] of ANCHORS){
     const d=Math.hypot(kps[a].x-kps[b].x,kps[a].y-kps[b].y);
@@ -684,7 +697,8 @@ async function loop(){
           activeScale  = aruco.mmPerPx * depthCorr;
           rollForIris  = aruco.rollRad;
           rollDeg      = Math.abs(aruco.rollDeg);
-          rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(MAX_ROLL_DEG-SOFT_ROLL_DEG));
+          const arucoMaxRoll = adaptiveRollMax(ipdPxRaw||100);
+          rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(arucoMaxRoll-SOFT_ROLL_DEG));
           // Still use landmark yaw/dist metrics — but dist is not a gating condition with ArUco
           asymm        = lmScale ? lmScale.asymm : 1.0;
           distStatus   = 'ok'; // ArUco works at close range — don't gate on distance
@@ -727,8 +741,9 @@ async function loop(){
         const rMm=activeScale?rRadVid*2*activeScale*pf:null;
 
         // ── Pose indicator arcs ───────────────────────────────────────────
-        // Roll: 0°=perfect, 4°=limit
-        const rollT=Math.min(1,rollDeg/MAX_ROLL_DEG);
+        // Roll threshold is distance-adaptive (see adaptiveRollMax helper)
+        const adaptiveMaxRoll = adaptiveRollMax(ipdPx);
+        const rollT=Math.min(1,rollDeg/adaptiveMaxRoll);
         setPoseArc('roll','val-roll','pind-roll',rollT,rollDeg.toFixed(1)+'°');
 
         // Yaw: asymm 1.0=perfect, 1.35=limit
