@@ -352,8 +352,13 @@ function setupArucoCanvas(){
 function detectAruco(){
   if(!S.arucoDetector || !arucoCtx) return null;
   const vw=video.videoWidth||1280, vh=video.videoHeight||720;
-  // Draw downscaled video frame (un-mirrored — ArUco works on raw video)
+  // Mirror the canvas to match the CSS-mirrored video display
+  // ArUco markers are not symmetric — must detect on the same orientation the user sees
+  arucoCtx.save();
+  arucoCtx.translate(320, 0);
+  arucoCtx.scale(-1, 1);
   arucoCtx.drawImage(video, 0,0, 320, 240);
+  arucoCtx.restore();
   const imageData = arucoCtx.getImageData(0,0,320,240);
   let markers;
   try{ markers = S.arucoDetector.detect(imageData); }
@@ -366,7 +371,8 @@ function detectAruco(){
 
   // Scale corners back to video pixel space
   const sx = vw/320, sy = vh/240;
-  const vc = corners.map(c=>({x:c.x*sx, y:c.y*sy}));
+  // Un-mirror X coords back to raw video space (we drew mirrored, so flip X back)
+  const vc = corners.map(c=>({x:(320-c.x)*sx, y:c.y*sy}));
 
   // Side length in video pixels (average all 4 sides)
   const sidePx = (
@@ -703,7 +709,7 @@ async function loop(){
         $('dbg2').textContent=`scale:${activeScale?activeScale.toFixed(5):'—'}  pf:${((1-pf)*100).toFixed(2)}%`;
         $('dbg3').textContent=`roll:${rollDeg.toFixed(1)}°  yaw:${asymm?asymm.toFixed(3):'—'}  dist:${distStatus}  ipd:${ipdPx?ipdPx.toFixed(0):'—'}px`;
         $('dbg4').textContent=`L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm`;
-        $('dbg5').textContent=`samples:${S.samples.length}  aruco_frames:${S.samples.filter(f=>f.scaleSource==='aruco').length}`;
+        $('dbg5').textContent=`samples:${S.samples.length}  aruco_frames:${S.samples.filter(f=>f.scaleSource==='aruco').length}  detector:${S.arucoDetector?'✓':'MISSING'}`;
 
         // ── Record ────────────────────────────────────────────────────────
         const poseOk = rollDeg<=MAX_ROLL_DEG && distStatus==='ok' && activeScale;
@@ -793,10 +799,20 @@ async function startCamera(){
 async function loadModel(){
   // ArUco detector
   setupArucoCanvas();
-  if(window.AR && window.AR.Detector){
-    S.arucoDetector=new AR.Detector();
+  // js-aruco2 namespace detection — try multiple known exports
+  const ArucoDetector = (window.AR && window.AR.Detector)
+    ? window.AR.Detector
+    : (window.ARuco && window.ARuco.Detector)
+    ? window.ARuco.Detector
+    : (window.aruco && window.aruco.Detector)
+    ? window.aruco.Detector
+    : null;
+  console.log('[ThirdIris] AR namespace:', Object.keys(window).filter(k=>k.toLowerCase().includes('aruco')||k==='AR'));
+  if(ArucoDetector){
+    S.arucoDetector = new ArucoDetector();
+    console.log('[ThirdIris] ArUco detector created:', S.arucoDetector);
   } else {
-    console.warn('[ThirdIris] js-aruco2 not loaded — ArUco disabled');
+    console.warn('[ThirdIris] js-aruco2 not loaded — check CDN. Available:', typeof window.AR, typeof window.ARuco);
   }
   // Face landmarks
   S.detector=await faceLandmarksDetection.createDetector(
