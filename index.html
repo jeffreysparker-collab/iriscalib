@@ -131,6 +131,13 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 }
 #arucoHint span{color:var(--accent)}
 #arucoHint .url{color:var(--accent2);word-break:break-all}
+.szBtn{
+  font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:4px;
+  cursor:pointer;border:1px solid var(--border);background:var(--surf);color:var(--dim);
+  transition:all .15s;
+}
+.szBtn.active{border-color:rgba(74,240,200,.5);color:var(--accent);background:rgba(74,240,200,.08)}
+.szBtn:hover{border-color:rgba(74,240,200,.3);color:var(--accent)}
 
 /* Debug */
 #debugPanel{display:none;font-family:var(--mono);font-size:9px;color:var(--dim);
@@ -162,14 +169,22 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 
     <div id="instr">Tap <span>▶ START</span> — then look straight at the camera.</div>
 
-    <!-- Four corner pose indicators -->
-    <div id="poseRow">
+    <!-- Five pose indicators -->
+    <div id="poseRow" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr">
       <div class="pind" id="pind-roll">
         <div class="pind-label">ROLL</div>
         <div class="pind-arc">
           <svg viewBox="0 0 36 36"><circle class="arc-bg" cx="18" cy="18" r="14"/>
             <circle class="arc-fill" id="arc-roll" cx="18" cy="18" r="14"/></svg>
           <div class="pind-val" id="val-roll">—</div>
+        </div>
+      </div>
+      <div class="pind" id="pind-pitch">
+        <div class="pind-label">PITCH</div>
+        <div class="pind-arc">
+          <svg viewBox="0 0 36 36"><circle class="arc-bg" cx="18" cy="18" r="14"/>
+            <circle class="arc-fill" id="arc-pitch" cx="18" cy="18" r="14"/></svg>
+          <div class="pind-val" id="val-pitch">—</div>
         </div>
       </div>
       <div class="pind" id="pind-yaw">
@@ -250,8 +265,15 @@ canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:n
 
     <!-- ArUco hint (shown until marker detected) -->
     <div id="arucoHint">
-      <span>▲ THIRD EYE CALIBRATION</span> — print a 20mm ArUco marker (MIP_36h12, ID 0) and stick it to your forehead for exact scale.<br>
-      Generate at: <span class="url">chev.me/arucogen</span> · Dict: MIP_36h12 · ID: 0 · Size: 20mm<br>
+      <span>▲ THIRD EYE CALIBRATION</span> — print an ArUco marker (MIP_36h12, ID 0) and stick it to your forehead for exact scale.<br>
+      Generate at: <span class="url">chev.me/arucogen</span> · Dict: MIP_36h12 · ID: 0<br>
+      Marker size:
+      <span id="sizeButtons" style="display:inline-flex;gap:4px;margin-left:4px">
+        <button onclick="setMarkerSize(20)"  id="sz20"  class="szBtn active">20mm</button>
+        <button onclick="setMarkerSize(40)"  id="sz40"  class="szBtn">40mm</button>
+        <button onclick="setMarkerSize(60)"  id="sz60"  class="szBtn">60mm</button>
+      </span>
+      &nbsp;·&nbsp;recommended: <span id="sizeRec" style="color:var(--accent)">40–60mm for best accuracy at working distance</span><br>
       Without marker: landmark geometry used (~±0.3mm systematic uncertainty).
     </div>
 
@@ -284,16 +306,18 @@ const $ = id => document.getElementById(id);
 
 // ── Tunable constants ─────────────────────────────────────────────────────────
 const REC_SECS        = 30;
-const BEST_N          = 100;    // take best N frames from the 30s recording
-const ARUCO_SIZE_MM   = 20.0;   // physical marker side length
+const BEST_N          = 100;
+let   ARUCO_SIZE_MM   = 20.0;   // set by marker size selector
 const CIRC_RING       = 2 * Math.PI * 35;
 
-// Pose thresholds — from sweep analysis
+// Pose thresholds
 const MAX_ROLL_DEG    = 4;
 const SOFT_ROLL_DEG   = 2;
 const MAX_YAW_ASYMM   = 1.35;
-const IPD_TOO_CLOSE   = 150;    // px
-const IPD_TOO_FAR     = 72;     // px
+const MAX_PITCH_DEG   = 5;      // chin-up/down limit
+const SOFT_PITCH_DEG  = 2.5;
+const IPD_TOO_CLOSE   = 150;
+const IPD_TOO_FAR     = 72;
 
 // Landmark anchor weights (unchanged from previous)
 const ANCHORS = [
@@ -502,10 +526,39 @@ function measureIris(kps, ci, upperLidIdx, lowerLidIdx) {
   };
 }
 function adaptiveRollMax(ipdPx){
-  // Loosen roll threshold at close distances (large ipdPx) to compensate
-  // for perspective distortion. Clamps between MAX_ROLL_DEG and 7°.
   if(!ipdPx) return MAX_ROLL_DEG;
   return Math.min(7, MAX_ROLL_DEG + Math.max(0, (ipdPx - IPD_TOO_FAR) / 30));
+}
+
+// ── Pitch estimation ──────────────────────────────────────────────────────────
+// Uses the ratio of upper-face height (brow→nose) to lower-face height (nose→chin)
+// relative to the IPD. When pitching down, the upper face foreshortens relative
+// to lower; pitching up does the opposite.
+// Landmarks: 10=forehead, 168=nose bridge, 4=nose tip, 152=chin, 468/473=iris centers
+function pitchAngle(kps){
+  // Vertical face extents in camera Y
+  const browY  = kps[10].y;
+  const noseY  = kps[4].y;
+  const chinY  = kps[152].y;
+  const faceH  = chinY - browY;
+  if(faceH < 10) return 0;
+  // Nose sits ~40% down from brow to chin in a neutral face
+  const noseFrac = (noseY - browY) / faceH;
+  // Deviation from neutral (0.40): positive = chin down, negative = chin up
+  const deviation = noseFrac - 0.40;
+  // Empirically ~0.01 deviation ≈ 1° of pitch (calibrated from geometry)
+  return deviation * 100; // degrees, + = chin down
+}
+
+// ── Marker size selector ──────────────────────────────────────────────────────
+function setMarkerSize(mm){
+  ARUCO_SIZE_MM = mm;
+  ['20','40','60'].forEach(s=>$('sz'+s).classList.toggle('active', Number(s)===mm));
+  const rec = mm===20 ? 'best at 30–50cm distance'
+            : mm===40 ? 'best at 50–80cm distance'
+            :           'best at 60–100cm distance';
+  $('sizeRec').textContent = `${mm}mm — ${rec}`;
+  toast(`Marker size set to ${mm}mm`);
 }
 
 function rollAngle(kps){
@@ -584,7 +637,7 @@ function setPoseArc(id,valId,pindId,t,label){
   pind.style.borderColor=t<0.4?'rgba(74,240,200,.3)':t<0.75?'rgba(255,179,71,.3)':'rgba(255,107,157,.3)';
 }
 function resetPoseArcs(){
-  ['roll','yaw','dist','aruco'].forEach(id=>{
+  ['roll','pitch','yaw','dist','aruco'].forEach(id=>{
     document.getElementById('arc-'+id).style.strokeDashoffset='88';
     document.getElementById('arc-'+id).style.stroke='var(--dim)';
     document.getElementById('val-'+id).textContent='—';
@@ -850,10 +903,17 @@ async function loop(){
         const lMm     = toMm(irisL.weightedDiam);
 
         // ── Pose indicator arcs ───────────────────────────────────────────
-        // Roll threshold is distance-adaptive (see adaptiveRollMax helper)
         const adaptiveMaxRoll = adaptiveRollMax(ipdPx);
         const rollT=Math.min(1,rollDeg/adaptiveMaxRoll);
         setPoseArc('roll','val-roll','pind-roll',rollT,rollDeg.toFixed(1)+'°');
+
+        // Pitch: nose position ratio vs neutral
+        const pitchDeg = pitchAngle(kps);
+        const pitchAbs = Math.abs(pitchDeg);
+        const pitchT   = Math.min(1, pitchAbs / MAX_PITCH_DEG);
+        const pitchSign = pitchDeg > 0 ? '↓' : '↑';
+        setPoseArc('pitch','val-pitch','pind-pitch', pitchT,
+          pitchAbs < 0.5 ? '✓' : pitchSign + pitchAbs.toFixed(1)+'°');
 
         // Yaw: asymm 1.0=perfect, 1.35=limit
         const yawT=asymm?Math.min(1,(asymm-1.0)/(MAX_YAW_ASYMM-1.0)):1;
@@ -874,7 +934,7 @@ async function loop(){
         .forEach(([ci, iris, col, mm, side])=>{
           const {cx,cy}=videoPxToCanvas(kps[ci].x,kps[ci].y);
           const radCss = (iris.horizDiam/2) * sc;
-          const qualColor=activeScale?(rollT<0.5&&yawT<0.5?col:'rgba(255,179,71,.7)'):'rgba(100,100,140,.5)';
+          const qualColor=activeScale?(rollT<0.5&&yawT<0.5&&pitchT<0.5?col:'rgba(255,179,71,.7)'):'rgba(100,100,140,.5)';
           octx.beginPath(); octx.arc(cx,cy,radCss,0,Math.PI*2);
           octx.strokeStyle=qualColor;
           octx.lineWidth=S.recording?2.5:1.5;
@@ -893,7 +953,7 @@ async function loop(){
 
         // ── Four corner target guides on video ────────────────────────────
         // Draw subtle corner brackets in the camera view to guide framing
-        drawCornerGuides(rollT,yawT,distT,arucoT);
+        drawCornerGuides(rollT,yawT,distT,arucoT,pitchT);
 
         // ── Live card update ──────────────────────────────────────────────
         if(!S.statsL&&lMm){$('valL').textContent=lMm.toFixed(2);$('valL').className='rval';$('unitL').textContent='mm  live';}
@@ -903,12 +963,13 @@ async function loop(){
         $('debugPanel').style.display='';
         $('dbg1').textContent=`video:${vw}×${vh}  sc:${sc.toFixed(4)}  src:${scaleSource||'none'}`;
         $('dbg2').textContent=`scale:${activeScale?activeScale.toFixed(5):'—'}  pf:${((1-pf)*100).toFixed(2)}%`;
-        $('dbg3').textContent=`roll:${rollDeg.toFixed(1)}°  yaw:${asymm?asymm.toFixed(3):'—'}  dist:${distStatus}  ipd:${ipdPx?ipdPx.toFixed(0):'—'}px`;
+        $('dbg3').textContent=`roll:${rollDeg.toFixed(1)}°  pitch:${pitchDeg.toFixed(1)}°  yaw:${asymm?asymm.toFixed(3):'—'}  dist:${distStatus}  ipd:${ipdPx?ipdPx.toFixed(0):'—'}px`;
         $('dbg4').textContent=`L:${lMm?lMm.toFixed(2):'—'}  R:${rMm?rMm.toFixed(2):'—'}mm`;
         $('dbg5').textContent=`samples:${S.samples.length}  aruco_frames:${S.samples.filter(f=>f.scaleSource==='aruco').length}  detector:${S.arucoDetector?'✓':'MISSING'}  ns:${Object.keys(window).filter(k=>k.toLowerCase().includes('aruco')||k==='AR').join(',')||'none'}`;
 
         // ── Record ────────────────────────────────────────────────────────
-        const poseOk = rollDeg<=MAX_ROLL_DEG && (scaleSource==='aruco' || distStatus==='ok') && activeScale;
+        const poseOk = rollDeg<=adaptiveMaxRoll && pitchAbs<=MAX_PITCH_DEG
+                    && (scaleSource==='aruco' || distStatus==='ok') && activeScale;
         if(S.recording && S.recStart){
           const elapsed=Date.now()-S.recStart;
           updateRing(elapsed);
@@ -922,7 +983,7 @@ async function loop(){
               scale: activeScale, scaleSource,
               arucoScale: aruco ? aruco.mmPerPx : null,
               lmScale: lmScale ? lmScale.mmPerPx : null,
-              rollDeg, rollWeight, asymm: asymm||1, pFactor: pf
+              rollDeg, rollWeight, pitchDeg, asymm: asymm||1, pFactor: pf
             };
             S.samples.push(frame);
             S.allRaw.push({t: Date.now(), ...frame});
@@ -945,9 +1006,9 @@ async function loop(){
 
 // ── Corner guides ─────────────────────────────────────────────────────────────
 // Four L-shaped brackets in canvas corners — color encodes overall pose quality
-function drawCornerGuides(rollT,yawT,distT,arucoT){
+function drawCornerGuides(rollT,yawT,distT,arucoT,pitchT=0){
   const W=overlay.width, H=overlay.height;
-  const overall=Math.max(rollT,yawT,distT*0.5); // arucoT is advisory not blocking
+  const overall=Math.max(rollT,yawT,pitchT,distT*0.5);
   const color=overall<0.4?'rgba(74,240,200,.5)':overall<0.75?'rgba(255,179,71,.5)':'rgba(255,107,157,.4)';
   const L=Math.min(W,H)*0.08;  // bracket arm length
   const M=Math.min(W,H)*0.04;  // margin from edge
@@ -1069,7 +1130,7 @@ $('exportBtn').onclick=()=>{
     'r_horiz_mm,r_vert_mm,r_radii_mm,'+
     'l_top_vis,l_bot_vis,r_top_vis,r_bot_vis,'+
     'scale_mm_per_px,scale_source,aruco_scale,lm_scale,blended,'+
-    'roll_deg,roll_weight,asymm,parallax_pct'
+    'roll_deg,pitch_deg,roll_weight,asymm,parallax_pct'
   ];
   S.allRaw.forEach(r=>{
     const blended=(r.arucoScale!=null&&r.lmScale!=null)?1:0;
@@ -1083,7 +1144,7 @@ $('exportBtn').onclick=()=>{
       r.arucoScale!=null?Number(r.arucoScale).toFixed(6):'',
       r.lmScale!=null?Number(r.lmScale).toFixed(6):'',
       blended,
-      Number(r.rollDeg).toFixed(2),(r.rollWeight||1).toFixed(3),
+      Number(r.rollDeg).toFixed(2),(r.pitchDeg||0).toFixed(2),(r.rollWeight||1).toFixed(3),
       (r.asymm||1).toFixed(3),((1-(r.pFactor||1))*100).toFixed(2)
     ].join(','));
   });
