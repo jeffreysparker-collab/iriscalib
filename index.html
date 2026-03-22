@@ -683,10 +683,6 @@ async function loop(){
         let activeScale, rollForIris, rollDeg, rollWeight, asymm, distStatus, ipdPx, scaleSource;
 
         if(aruco){
-          // ArUco marker sits on the forehead, which is ~FOREHEAD_DEPTH_MM *behind*
-          // (farther from lens than) the corneal plane. So the marker appears slightly
-          // smaller → mmPerPx is slightly too large. Correct downward:
-          //   scale_eye = scale_marker × (d_eye - FOREHEAD_DEPTH_MM) / d_eye
           const ipdPxRaw = lmScale ? lmScale.ipdPx : null;
           let depthCorr = 1.0;
           if(ipdPxRaw && ipdPxRaw > 20){
@@ -695,13 +691,20 @@ async function loop(){
               depthCorr = (dEye_mm - FOREHEAD_DEPTH_MM) / dEye_mm;
           }
           activeScale  = aruco.mmPerPx * depthCorr;
-          rollForIris  = aruco.rollRad;
-          rollDeg      = Math.abs(aruco.rollDeg);
-          const arucoMaxRoll = adaptiveRollMax(ipdPxRaw||100);
-          rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(arucoMaxRoll-SOFT_ROLL_DEG));
-          // Still use landmark yaw/dist metrics — but dist is not a gating condition with ArUco
+          // Always use landmark roll when available — it's consistent and stable.
+          // ArUco marker edge roll measures marker orientation, not head tilt.
+          if(lmScale){
+            rollForIris  = lmScale.roll;
+            rollDeg      = lmScale.rollDeg;
+            rollWeight   = lmScale.rollWeight;
+          } else {
+            rollForIris  = aruco.rollRad;
+            rollDeg      = Math.abs(aruco.rollDeg);
+            const arucoMaxRoll = adaptiveRollMax(ipdPxRaw||100);
+            rollWeight   = rollDeg<=SOFT_ROLL_DEG?1.0:Math.max(0.05,1-(rollDeg-SOFT_ROLL_DEG)/(arucoMaxRoll-SOFT_ROLL_DEG));
+          }
           asymm        = lmScale ? lmScale.asymm : 1.0;
-          distStatus   = 'ok'; // ArUco works at close range — don't gate on distance
+          distStatus   = 'ok';
           ipdPx        = ipdPxRaw || 100;
           scaleSource  = 'aruco';
           $('scaleBadge').className='aruco';
