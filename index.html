@@ -330,6 +330,7 @@ const ANCHORS = [
 const CORNEAL_MM = 8.0;
 const IPD_MM_MEAN = 63.0;
 const FOREHEAD_DEPTH_MM = 3.0;  // forehead skin ~3mm anterior to corneal plane
+const CORNEAL_MAG_CORR  = 0.96; // apparent→anatomical: correct for corneal magnification (~4%)
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
@@ -898,8 +899,9 @@ async function loop(){
         const pf = (activeScale && scaleSource==='lm') ? parallaxFactor(activeScale) : 1;
         const scale = activeScale ? activeScale * pf : null;
 
-        // Convert all estimates to mm
-        const toMm = (px) => scale ? px * scale : null;
+        // Convert all estimates to mm, applying corneal magnification correction (×0.96)
+        // to convert apparent (photographic) diameter to true anatomical diameter.
+        const toMm = (px) => scale ? px * scale * CORNEAL_MAG_CORR : null;
         const rHoriz  = toMm(irisR.horizDiam);
         const rVert   = irisR.vertDiam  !== null ? toMm(irisR.vertDiam)  : null;
         const rRadii  = toMm(irisR.radiusDiam);
