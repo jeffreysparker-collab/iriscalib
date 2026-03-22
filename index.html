@@ -360,8 +360,8 @@ function detectAruco(){
   arucoCtx.restore();
   const imageData = arucoCtx.getImageData(0,0,320,240);
   let markers;
-  try{ markers = S.arucoDetector.detect(imageData); }
-  catch(e){ return null; }
+  try{ markers = S.arucoDetector.detect(imageData.width, imageData.height, imageData.data); }
+  catch(e){ console.warn('[ThirdIris] aruco detect error:',e); return null; }
   if(!markers || !markers.length) return null;
 
   // Take first marker (ID 0 preferred, else whatever we see)
@@ -809,7 +809,7 @@ async function loadModel(){
     null;
   console.log('[ThirdIris] AR namespace:', Object.keys(window).filter(k=>k.toLowerCase().includes('aruco')||k==='AR'));
   if(ArucoDetector){
-    S.arucoDetector = new ArucoDetector();
+    S.arucoDetector = new ArucoDetector({ dictionaryName: 'ARUCO' });
     console.log('[ThirdIris] ArUco detector created:', S.arucoDetector);
   } else {
     console.warn('[ThirdIris] js-aruco2 not loaded — check CDN. Available:', typeof window.AR, typeof window.ARuco);
