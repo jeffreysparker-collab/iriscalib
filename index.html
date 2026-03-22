@@ -459,7 +459,7 @@ function adaptiveRollMax(ipdPx){
   return Math.min(7, MAX_ROLL_DEG + Math.max(0, (ipdPx - IPD_TOO_FAR) / 30));
 }
 
-
+function rollAngle(kps){
   // Use multiple stable reference pairs and average for robustness.
   // Outer eye corners (33→263) are more stable than iris centers at close range.
   const r1 = Math.atan2(kps[263].y-kps[33].y,  kps[263].x-kps[33].x);
