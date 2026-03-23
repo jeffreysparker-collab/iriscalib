@@ -306,7 +306,7 @@ const $ = id => document.getElementById(id);
 
 // ── Tunable constants ─────────────────────────────────────────────────────────
 const REC_SECS        = 30;
-const BEST_N          = 100;
+const BEST_N          = 500;   // empirically optimal from N-sweep (between-trial SD minimum)
 let   ARUCO_SIZE_MM   = 20.0;   // set by marker size selector
 const CIRC_RING       = 2 * Math.PI * 35;
 
@@ -491,39 +491,63 @@ function measureIris(kps, ci, upperLidIdx, lowerLidIdx) {
   const el=kps[ci+3].x, ely=kps[ci+3].y; // left edge
   const eb=kps[ci+4].x, eby=kps[ci+4].y; // bottom edge
 
-  // Estimate 1: horizontal edge-to-edge (HVID — always use)
+  // Estimate 1: horizontal edge-to-edge (HVID — primary, always use)
+  // Matches clinical white-to-white definition, immune to eyelid occlusion
   const horizDiam = Math.hypot(er-el, ery-ely);
+  const horizRad  = horizDiam / 2;
 
-  // Eyelid occlusion checks (with small tolerance buffer)
-  const BUFFER = 2; // px — landmark must be clearly outside lid
+  // ── Eyelid occlusion check ────────────────────────────────────────────────
+  // BUFFER=6px: analysis showed 2px too loose (top/bottom consistently occluded
+  // despite 100% "visible" flag). Ratio gate catches partial lid occlusion
+  // that the Y-position check misses — occluded points pull inward by 15-40%.
+  const BUFFER    = 6;    // px — must be clearly clear of lid margin
+  const RATIO_GATE = 0.85; // landmark must be ≥85% of horiz radius from center
   const upperY = kps[upperLidIdx].y;
   const lowerY = kps[lowerLidIdx].y;
-  const topVisible    = ety < upperY - BUFFER;
-  const bottomVisible = eby > lowerY + BUFFER;
 
-  // Estimate 2: vertical edge-to-edge (only if both lids clear)
+  const rRight  = Math.hypot(er-cx, ery-cy);
+  const rLeft   = Math.hypot(el-cx, ely-cy);
+  const rTop    = Math.hypot(et-cx, ety-cy);
+  const rBottom = Math.hypot(eb-cx, eby-cy);
+
+  // Apply ratio gate to horizontal points too (sanity check)
+  const rightOk  = rRight  >= horizRad * RATIO_GATE;
+  const leftOk   = rLeft   >= horizRad * RATIO_GATE;
+  const topVisible    = ety < upperY - BUFFER && rTop    >= horizRad * RATIO_GATE;
+  const bottomVisible = eby > lowerY + BUFFER && rBottom >= horizRad * RATIO_GATE;
+
+  // Estimate 2: vertical edge-to-edge (only when both poles clearly unoccluded)
   let vertDiam = null;
   if(topVisible && bottomVisible)
     vertDiam = Math.hypot(et-eb, ety-eby);
 
-  // Estimate 3: center-to-edge radii (use horizontal always; top/bottom gated)
-  const rRight  = Math.hypot(er-cx, ery-cy);
-  const rLeft   = Math.hypot(el-cx, ely-cy);
-  const rTop    = topVisible    ? Math.hypot(et-cx, ety-cy) : null;
-  const rBottom = bottomVisible ? Math.hypot(eb-cx, eby-cy) : null;
-  const radii   = [rRight, rLeft, rTop, rBottom].filter(r=>r!==null);
-  const radiusDiam = radii.reduce((s,r)=>s+r,0)/radii.length * 2;
+  // Estimate 3: radii mean — only include points that pass the ratio gate
+  // Analysis showed top/bottom radii contaminate the mean by ~1mm even when
+  // flagged as "visible". Using only passing points prevents this.
+  const validRadii = [
+    rightOk  ? rRight  : null,
+    leftOk   ? rLeft   : null,
+    topVisible    ? rTop    : null,
+    bottomVisible ? rBottom : null,
+  ].filter(r => r !== null);
 
-  // Weighted mean: horiz gets weight 2 (most reliable), vert 1.5, radii 1
-  const estimates = [{v:horizDiam,w:2.0}];
-  if(vertDiam!==null) estimates.push({v:vertDiam,w:1.5});
-  estimates.push({v:radiusDiam,w:1.0});
-  const wSum = estimates.reduce((s,e)=>s+e.w,0);
-  const weightedDiam = estimates.reduce((s,e)=>s+e.v*e.w,0)/wSum;
+  const radiusDiam = validRadii.length > 0
+    ? validRadii.reduce((s,r) => s+r, 0) / validRadii.length * 2
+    : horizDiam; // fallback to horiz if all gated out
+
+  // ── Weighted blend ────────────────────────────────────────────────────────
+  // horiz weight 3: most stable, direct HVID analog, immune to lid occlusion
+  // radii weight 1: cross-check, now cleaned by ratio gate
+  // vert  weight 1: added only when both poles clearly unoccluded
+  const estimates = [{v: horizDiam, w: 3.0}, {v: radiusDiam, w: 1.0}];
+  if(vertDiam !== null) estimates.push({v: vertDiam, w: 1.0});
+  const wSum = estimates.reduce((s,e) => s+e.w, 0);
+  const weightedDiam = estimates.reduce((s,e) => s+e.v*e.w, 0) / wSum;
 
   return {
     horizDiam, vertDiam, radiusDiam, weightedDiam,
-    topVisible, bottomVisible, nRadii: radii.length
+    topVisible, bottomVisible,
+    nRadii: validRadii.length
   };
 }
 function adaptiveRollMax(ipdPx){
@@ -962,7 +986,11 @@ async function loop(){
 
         // ── Four corner target guides on video ────────────────────────────
         // Draw subtle corner brackets in the camera view to guide framing
-        drawCornerGuides(rollT,yawT,distT,arucoT,pitchT);
+        drawCornerGuides(rollT, yawT, distT, arucoT, pitchT,
+                         rollDeg * Math.sign(rollForIris||0),
+                         pitchDeg,
+                         asymm ? asymm - 1.0 : 0,
+                         distStatus);
 
         // ── Live card update ──────────────────────────────────────────────
         if(!S.statsL&&lMm){$('valL').textContent=lMm.toFixed(2);$('valL').className='rval';$('unitL').textContent='mm  live';}
@@ -1015,30 +1043,126 @@ async function loop(){
 
 // ── Corner guides ─────────────────────────────────────────────────────────────
 // Four L-shaped brackets in canvas corners — color encodes overall pose quality
-function drawCornerGuides(rollT,yawT,distT,arucoT,pitchT=0){
+// ── roundRect polyfill (Safari < 15.4, older Chrome) ─────────────────────────
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+    this.beginPath();
+    this.moveTo(x+r, y);
+    this.arcTo(x+w, y,   x+w, y+h, r);
+    this.arcTo(x+w, y+h, x,   y+h, r);
+    this.arcTo(x,   y+h, x,   y,   r);
+    this.arcTo(x,   y,   x+w, y,   r);
+    this.closePath();
+  };
+}
+
+// ── Corner bubble levels ───────────────────────────────────────────────────────
+function drawCornerGuides(rollT, yawT, distT, arucoT, pitchT=0,
+                          rollSigned=0, pitchSigned=0, yawSigned=0, distStatus='ok'){
   const W=overlay.width, H=overlay.height;
-  const overall=Math.max(rollT,yawT,pitchT,distT*0.5);
-  const color=overall<0.4?'rgba(74,240,200,.5)':overall<0.75?'rgba(255,179,71,.5)':'rgba(255,107,157,.4)';
-  const L=Math.min(W,H)*0.08;  // bracket arm length
-  const M=Math.min(W,H)*0.04;  // margin from edge
-  const lw=2;
+  const overall = Math.max(rollT, yawT, pitchT, distT*0.5);
 
-  octx.strokeStyle=color; octx.lineWidth=lw;
+  // Color encodes overall pose quality
+  const goodCol  = 'rgba(74,240,200,';
+  const warnCol  = 'rgba(255,179,71,';
+  const badCol   = 'rgba(255,107,157,';
+  const qualCol  = overall<0.4 ? goodCol : overall<0.75 ? warnCol : badCol;
 
-  // Top-left
-  octx.beginPath(); octx.moveTo(M,M+L); octx.lineTo(M,M); octx.lineTo(M+L,M); octx.stroke();
-  // Top-right
-  octx.beginPath(); octx.moveTo(W-M-L,M); octx.lineTo(W-M,M); octx.lineTo(W-M,M+L); octx.stroke();
-  // Bottom-left
-  octx.beginPath(); octx.moveTo(M,H-M-L); octx.lineTo(M,H-M); octx.lineTo(M+L,H-M); octx.stroke();
-  // Bottom-right
-  octx.beginPath(); octx.moveTo(W-M-L,H-M); octx.lineTo(W-M,H-M); octx.lineTo(W-M,H-M-L); octx.stroke();
+  // Bubble level helper — draws a track + bubble
+  // cx,cy = center of level, axis = 'h' horizontal or 'v' vertical
+  // deviation = signed offset (-1 to +1), t = normalized badness (0=perfect)
+  function drawLevel(cx, cy, axis, deviation, t){
+    const trackLen = Math.min(W, H) * 0.10;
+    const trackW   = Math.min(W, H) * 0.022;
+    const bubR     = trackW * 0.72;
+    const maxShift = trackLen * 0.42; // bubble travel range
 
-  // Center crosshair (very subtle)
-  const cx=W/2, cy=H/2, cl=L*0.4;
-  octx.strokeStyle=color.replace('.5',',.2').replace('.4','.15');
-  octx.beginPath(); octx.moveTo(cx-cl,cy); octx.lineTo(cx+cl,cy);
-  octx.moveTo(cx,cy-cl); octx.lineTo(cx,cy+cl); octx.stroke();
+    const tCol = t < 0.4 ? goodCol : t < 0.75 ? warnCol : badCol;
+
+    // Track background (rounded rect)
+    const tx = axis==='h' ? cx - trackLen/2 : cx - trackW/2;
+    const ty = axis==='h' ? cy - trackW/2   : cy - trackLen/2;
+    const tw = axis==='h' ? trackLen         : trackW;
+    const th = axis==='h' ? trackW           : trackLen;
+    const r  = trackW / 2;
+
+    octx.beginPath();
+    octx.roundRect(tx, ty, tw, th, r);
+    octx.fillStyle   = 'rgba(0,0,0,0.35)';
+    octx.fill();
+    octx.strokeStyle = tCol + '0.4)';
+    octx.lineWidth   = 1;
+    octx.stroke();
+
+    // Center mark (hairline)
+    octx.strokeStyle = tCol + '0.5)';
+    octx.lineWidth = 1;
+    octx.beginPath();
+    if(axis==='h'){
+      octx.moveTo(cx, cy - trackW*0.3);
+      octx.lineTo(cx, cy + trackW*0.3);
+    } else {
+      octx.moveTo(cx - trackW*0.3, cy);
+      octx.lineTo(cx + trackW*0.3, cy);
+    }
+    octx.stroke();
+
+    // Bubble — clamp so it stays inside track
+    const shift = Math.max(-maxShift, Math.min(maxShift, deviation * maxShift));
+    const bx = axis==='h' ? cx + shift : cx;
+    const by = axis==='h' ? cy         : cy + shift;
+
+    // Glow when centered
+    if(t < 0.25){
+      octx.beginPath();
+      octx.arc(bx, by, bubR * 1.6, 0, Math.PI*2);
+      octx.fillStyle = tCol + '0.12)';
+      octx.fill();
+    }
+
+    // Bubble fill
+    octx.beginPath();
+    octx.arc(bx, by, bubR, 0, Math.PI*2);
+    const grad = octx.createRadialGradient(bx-bubR*0.3, by-bubR*0.3, 0, bx, by, bubR);
+    grad.addColorStop(0, tCol + '0.95)');
+    grad.addColorStop(1, tCol + '0.55)');
+    octx.fillStyle = grad;
+    octx.fill();
+    octx.strokeStyle = tCol + '0.8)';
+    octx.lineWidth = 0.8;
+    octx.stroke();
+  }
+
+  const M  = Math.min(W,H) * 0.055; // margin from edge to level center
+  const pad = Math.min(W,H) * 0.07; // inset from corner
+
+  // ── Top-left: ROLL (horizontal bubble — tilt left/right) ─────────────────
+  // Bubble moves right if head tilts right, left if tilts left
+  drawLevel(M + pad, M, 'h', rollSigned / MAX_ROLL_DEG, rollT);
+
+  // ── Top-right: PITCH (vertical bubble — chin up/down) ────────────────────
+  // Bubble moves up if chin up, down if chin down
+  drawLevel(W - M - pad, M, 'v', pitchSigned / MAX_PITCH_DEG, pitchT);
+
+  // ── Bottom-left: YAW (horizontal bubble — face turn left/right) ──────────
+  // Bubble moves right if face turns right (asymm > 1 on right side)
+  drawLevel(M + pad, H - M, 'h', yawSigned / (MAX_YAW_ASYMM - 1.0), yawT);
+
+  // ── Bottom-right: DIST (vertical bubble — too close / too far) ────────────
+  // distT peaks at both extremes; we need signed direction
+  // Use the raw distT shape: >0.5 means out of range, sign from threshold
+  // We pass distSigned separately — positive = too close, negative = too far
+  const distSigned = distT * (distStatus === 'close' ? 1 : distStatus === 'far' ? -1 : 0);
+  drawLevel(W - M - pad, H - M, 'v', distSigned, distT);
+
+  // ── Subtle center crosshair ────────────────────────────────────────────────
+  const ccx=W/2, ccy=H/2, cl=Math.min(W,H)*0.032;
+  octx.strokeStyle = qualCol + '0.18)';
+  octx.lineWidth = 1;
+  octx.beginPath();
+  octx.moveTo(ccx-cl, ccy); octx.lineTo(ccx+cl, ccy);
+  octx.moveTo(ccx, ccy-cl); octx.lineTo(ccx, ccy+cl);
+  octx.stroke();
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
